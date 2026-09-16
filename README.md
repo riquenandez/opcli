@@ -130,17 +130,41 @@ const r = await ucho.run(["tasks", "list", "--status", "open", "--limit", "1"], 
 expect(r.exit).toBe(0)
 ```
 
-`run()` defaults to no TTY, so tests see what agents see. `invoke(name, json, runtime)` is the same executor MCP will use.
+`run()` defaults to no TTY, so tests see what agents see. `invoke(name, json, runtime)` is the same executor MCP uses.
 
 ## MCP
 
-v1 ships the seam, not a server:
+`opcli` does not run an MCP server. You write the host. There is no `--mcp` flag, no stdio server, no HTTP server, and no MCP SDK. v1 ships two functions, not a server.
+
+Import them from `opcli/mcp`. The root package does not export them.
 
 ```ts
 import { mcpTools, mcpCall } from "opcli/mcp"
 ```
 
-Tool input is JSON, not a round-trip through argv.
+`mcpTools(app)` maps `app.manifest().operations`. Dots in the operation name become underscores, so `items.list` becomes `items_list`. The tool description is the operation `summary`.
+
+If the operation has `confirm`, the input schema gains optional boolean `yes`. If the output is unbounded data, the input schema gains optional `limit` (integer, minimum 1) and `cursor` (string). Stream, bounded, single, and opaque operations do not get those fields. Opaque operations omit `outputSchema`.
+
+Each tool carries `annotations`. `readOnlyHint` is true when `effects` is `read_only`. `destructiveHint` is true when `confirm` is set. `idempotentHint` is true when `effects` is not `non_idempotent`.
+
+The builtins `manifest` and `skill` appear as tools. `auth.whoami` appears when `spec.auth` is set.
+
+`mcpCall(app, toolName, args, runtime)` maps underscores back to dots and calls `app.invoke`. Tests use that same executor. Arguments are JSON, not argv.
+
+Pass a full `Runtime`: `signal`, `auth`, `confirmed`, `actor`, and `note`. Put credentials on `runtime.auth`. `mcpCall` does not call `resolveCredential`. `@path`, `@-`, and `@@` stay as written. Pass the file contents as a string. Confirm with `runtime.confirmed` or with `yes: true`. There is no TTY prompt.
+
+```ts
+const result = await mcpCall(ucho, "tasks_list", { status: "open" }, {
+  signal: new AbortController().signal,
+  auth: { token: "t_test", source: "env", via: "UCHO_TOKEN" },
+  confirmed: false,
+  actor: "agent",
+  note() {},
+})
+```
+
+A failure sets `isError` to `true` and puts `failurePayload` on `structuredContent.error`. A data result puts `{ data, meta }` on `structuredContent`. A stream is collected into an array and stopped at `app.pagination.maxLimit`. Opaque output becomes text such as `opaque text/markdown`. The bytes are discarded, so `skill` through `mcpCall` is a stub.
 
 ## Not in v1
 
