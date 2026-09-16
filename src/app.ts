@@ -16,6 +16,16 @@ import {
   type Page,
 } from "./operation.ts"
 import { suggest } from "./suggest.ts"
+import {
+  buildTree,
+  builtinGroupSummaries,
+  find as findInTree,
+  type CommandTree,
+  type Found,
+  type TreeNode,
+} from "./tree.ts"
+
+export type { Found, TreeNode }
 
 export type { AuthSpec }
 
@@ -24,30 +34,12 @@ export type AppSpec = {
   readonly version: string
   readonly summary: string
   readonly operations: readonly AnyOperation[]
+  /** Full dotted prefixes implied by operation names. Exhaustive both ways. */
   readonly groups?: Readonly<Record<string, string>>
   readonly auth?: AuthSpec
   readonly pagination?: { readonly defaultLimit: number; readonly maxLimit: number }
   readonly agentEnv?: readonly string[]
 }
-
-export type TreeNode =
-  | {
-      readonly kind: "group"
-      readonly path: readonly string[]
-      readonly summary: string
-      readonly children: readonly TreeNode[]
-    }
-  | { readonly kind: "op"; readonly op: AnyOperation }
-
-export type Found =
-  | { readonly kind: "op"; readonly op: AnyOperation; readonly rest: readonly string[] }
-  | { readonly kind: "group"; readonly node: Extract<TreeNode, { kind: "group" }>; readonly rest: readonly string[] }
-  | {
-      readonly kind: "miss"
-      readonly at: readonly string[]
-      readonly token: string
-      readonly suggestions: readonly string[]
-    }
 
 export type Runtime = {
   readonly signal: AbortSignal
@@ -82,89 +74,6 @@ export type App = {
   run(argv: readonly string[], io?: import("./cli.ts").TestIO): Promise<import("./cli.ts").RunResult>
   manifest(scope?: readonly string[]): Manifest
   skill(): string
-}
-
-function siblings(node: Extract<TreeNode, { kind: "group" }>): string[] {
-  return node.children.map((child) =>
-    child.kind === "group" ? (child.path[child.path.length - 1] ?? "") : (child.op.path[child.op.path.length - 1] ?? ""),
-  )
-}
-
-function walk(
-  node: Extract<TreeNode, { kind: "group" }>,
-  tokens: readonly string[],
-  at: readonly string[],
-): Found {
-  if (tokens.length === 0) return { kind: "group", node, rest: [] }
-  const [head, ...tail] = tokens
-  if (!head) return { kind: "group", node, rest: [] }
-  const child = node.children.find((item) => {
-    const name = item.kind === "group" ? item.path[item.path.length - 1] : item.op.path[item.op.path.length - 1]
-    return name === head
-  })
-  if (!child) {
-    return {
-      kind: "miss",
-      at,
-      token: head,
-      suggestions: suggest(head, siblings(node)) ? [suggest(head, siblings(node))!] : [],
-    }
-  }
-  if (child.kind === "op") return { kind: "op", op: child.op, rest: tail }
-  return walk(child, tail, [...at, head])
-}
-
-function buildTree(spec: AppSpec, operations: readonly AnyOperation[]): Extract<TreeNode, { kind: "group" }> {
-  type MutableGroup = {
-    kind: "group"
-    path: string[]
-    summary: string
-    children: Array<MutableGroup | { kind: "op"; op: AnyOperation }>
-  }
-  const root: MutableGroup = {
-    kind: "group",
-    path: [],
-    summary: spec.summary,
-    children: [],
-  }
-  const groups = new Map<string, MutableGroup>([[ "", root ]])
-
-  const ensure = (path: string[]): MutableGroup => {
-    const key = path.join(".")
-    const existing = groups.get(key)
-    if (existing) return existing
-    const parent = ensure(path.slice(0, -1))
-    const name = path[path.length - 1] ?? ""
-    const group: MutableGroup = {
-      kind: "group",
-      path,
-      summary: spec.groups?.[name] ?? `${name} commands`,
-      children: [],
-    }
-    parent.children.push(group)
-    groups.set(key, group)
-    return group
-  }
-
-  for (const operation of operations) {
-    const parentPath = operation.path.slice(0, -1)
-    const parent = ensure(parentPath)
-    parent.children.push({ kind: "op", op: operation })
-  }
-
-  const freeze = (node: MutableGroup): Extract<TreeNode, { kind: "group" }> => ({
-    kind: "group",
-    path: node.path,
-    summary: node.summary,
-    children: node.children
-      .map((child) => (child.kind === "group" ? freeze(child) : child))
-      .sort((a, b) => {
-        const an = a.kind === "group" ? a.path[a.path.length - 1] ?? "" : a.op.path[a.op.path.length - 1] ?? ""
-        const bn = b.kind === "group" ? b.path[b.path.length - 1] ?? "" : b.op.path[b.op.path.length - 1] ?? ""
-        return an.localeCompare(bn)
-      }),
-  })
-  return freeze(root)
 }
 
 function checkFlagConsistency(operations: readonly AnyOperation[]): void {
@@ -265,16 +174,11 @@ function toOutcome(op: AnyOperation, produced: unknown, fields?: readonly string
 
 export function app(spec: AppSpec): App {
   const pagination = spec.pagination ?? { defaultLimit: 50, maxLimit: 200 }
-  const holder: { app?: App; tree?: Extract<TreeNode, { kind: "group" }>; operations: AnyOperation[] } = {
+  const holder: { app?: App; tree?: CommandTree; operations: AnyOperation[] } = {
     operations: [],
   }
 
   const userOps = [...spec.operations]
-  const names = new Set<string>()
-  for (const operation of userOps) {
-    if (names.has(operation.name)) fail.usage(`duplicate operation "${operation.name}"`)
-    names.add(operation.name)
-  }
   checkFlagConsistency(userOps)
 
   const authFlag = spec.auth?.flag
@@ -339,10 +243,17 @@ export function app(spec: AppSpec): App {
 
   const operations = [...userOps, ...builtins]
   holder.operations = operations
-  const tree = buildTree(spec, operations)
+  const tree = buildTree({
+    spec: {
+      name: spec.name,
+      summary: spec.summary,
+      groups: { ...builtinGroupSummaries(spec), ...spec.groups },
+    },
+    operations,
+  })
   holder.tree = tree
 
-  const find = (tokens: readonly string[]): Found => walk(tree, tokens, [])
+  const find = (tokens: readonly string[]): Found => findInTree(tree, tokens)
 
   const invoke = async (
     target: string | AnyOperation,

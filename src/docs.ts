@@ -102,7 +102,7 @@ function operationsOf(app: App): AnyOperation[] {
     const result = app.find(tokens)
     if (result.kind === "op") found.push(result.op)
     if (result.kind === "group") {
-      for (const child of result.node.children) {
+      for (const child of result.node.children.values()) {
         if (child.kind === "op") found.push(child.op)
         else walk([...child.path])
       }
@@ -125,14 +125,9 @@ export function helpText(app: App, scope: readonly string[]): string {
     } else {
       lines.push(`${app.spec.name} ${scope.join(" ")}`, "")
     }
-    for (const child of found.node.children) {
-      if (child.kind === "group") {
-        const name = child.path[child.path.length - 1] ?? ""
-        lines.push(`  ${name.padEnd(12)} ${child.summary}`)
-      } else {
-        const name = child.op.path[child.op.path.length - 1] ?? ""
-        lines.push(`  ${name.padEnd(12)} ${child.op.summary}`)
-      }
+    for (const [name, child] of found.node.children) {
+      if (child.kind === "group") lines.push(`  ${name.padEnd(12)} ${child.summary}`)
+      else lines.push(`  ${name.padEnd(12)} ${child.op.summary}`)
     }
     lines.push("", `Run \`${app.spec.name} ${[...scope, "<command>"].join(" ").trim()} --help\` for details. \`${app.spec.name} --help --json\` prints the machine manifest.`)
     return lines.join("\n")

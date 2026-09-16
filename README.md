@@ -84,6 +84,8 @@ if (import.meta.main) process.exit(await ucho.main())
 
 `"tasks.list"` becomes `ucho tasks list`. There is no `resource()` helper. CRUD is N operations that share a prefix, which is enough for grouped help.
 
+`groups` keys are those prefixes in full (`tasks`, or `projects.comments` when nested). Every implied prefix must have a caption; leftover keys fail. An operation and a group cannot share a path (`projects` next to `projects.list`).
+
 ## What the process does
 
 ```

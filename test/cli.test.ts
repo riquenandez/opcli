@@ -130,7 +130,7 @@ const cli = app({
   name: "ucho",
   version: "1.4.0",
   summary: "Task tracker",
-  groups: { tasks: "Manage tasks" },
+  groups: { tasks: "Manage tasks", logs: "Stream logs" },
   auth: { env: "UCHO_TOKEN", flag: "token" },
   operations: [tasksList, tasksGet, tasksCreate, tasksDelete, logsTail, dump],
 })
@@ -212,6 +212,8 @@ describe("opcli", () => {
     const r = await cli.run(["--help"])
     expect(r.exit).toBe(0)
     expect(r.stdout).toContain("tasks")
+    expect(r.stdout).toContain("Manage tasks")
+    expect(r.stdout).toContain("Stream logs")
     const leaf = await cli.run(["tasks", "list", "--help"])
     expect(leaf.stdout).toContain("--status")
     expect(leaf.stdout).toContain("--limit")
