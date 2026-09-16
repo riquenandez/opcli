@@ -17,7 +17,6 @@ export type HumanTty = {
 export type Detection = {
   readonly actor: Actor
   readonly human: HumanTty | null
-  readonly color: boolean
 }
 
 export type DetectIO = {
@@ -50,10 +49,5 @@ export function detect(io: DetectIO, extraAgentEnv: readonly string[] = []): Det
   const canPrompt =
     actor === "human" && io.stdinIsTTY && io.stdoutIsTTY && io.stderrIsTTY && io.prompt
   const human: HumanTty | null = canPrompt && io.prompt ? { prompt: io.prompt } : null
-  const color =
-    io.stdoutIsTTY &&
-    io.env.NO_COLOR === undefined &&
-    !ci &&
-    actor === "human"
-  return { actor, human, color }
+  return { actor, human }
 }

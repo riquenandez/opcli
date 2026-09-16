@@ -30,6 +30,20 @@ export class Fail extends Error implements Failure {
   }
 }
 
+export function failurePayload(failure: Failure): {
+  readonly kind: FailureKind
+  readonly message: string
+  readonly hint?: string
+  readonly details?: unknown
+} {
+  return {
+    kind: failure.kind,
+    message: failure.message,
+    hint: failure.hint,
+    details: failure.details,
+  }
+}
+
 export function isFail(value: unknown): value is Fail {
   return value instanceof Fail
 }

@@ -75,8 +75,6 @@ export const RESERVED_FLAGS = [
   "input",
   "help",
   "version",
-  "color",
-  "noColor",
 ] as const
 
 export type ReservedFlag = (typeof RESERVED_FLAGS)[number]
@@ -176,10 +174,6 @@ export function op<In extends Contract, Out extends OutputContract>(
     inputFields,
     outputFields,
   }
-}
-
-export function outputKind(output: OutputContract): OutputKind {
-  return output.kind
 }
 
 export function outputCardinality(output: OutputContract): Cardinality | undefined {

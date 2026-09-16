@@ -368,7 +368,12 @@ export function app(spec: AppSpec): App {
       note: runtime.note ?? (() => {}),
     }
     try {
-      if (opts?.fields && operation.output.kind !== "opaque") {
+      if (opts?.fields && opts.fields.length > 0) {
+        if (operation.output.kind === "opaque" || operation.output.kind === "stream") {
+          fail.usage(`--fields does not apply to ${operation.output.kind} output`, {
+            hint: "omit --fields",
+          })
+        }
         checkFields(operation.outputFields, opts.fields)
       }
       const need: AuthNeed = operation.auth ?? (spec.auth ? "required" : "none")
@@ -379,22 +384,24 @@ export function app(spec: AppSpec): App {
             : "configure auth",
         })
       }
-      if (operation.confirm && !full.confirmed) {
+      const parsedInput = { ...((input ?? {}) as Record<string, unknown>) }
+      const extraYes = parsedInput.yes === true
+      const pageLimit = parsedInput.limit
+      const pageCursor = parsedInput.cursor
+      const rest = { ...parsedInput }
+      delete rest.yes
+      delete rest.limit
+      delete rest.cursor
+      if (operation.confirm && !full.confirmed && !extraYes) {
         const message =
           typeof operation.confirm === "function"
-            ? operation.confirm(input as never)
+            ? operation.confirm(rest as never)
             : operation.confirm
         fail.usage(`"${operation.name.replaceAll(".", " ")}" is destructive and requires --yes when no person is at the terminal`, {
           hint: `${spec.name} ${operation.path.join(" ")} --yes`,
           details: { confirm: message },
         })
       }
-      const parsedInput = { ...((input ?? {}) as Record<string, unknown>) }
-      const pageLimit = parsedInput.limit
-      const pageCursor = parsedInput.cursor
-      const rest = { ...parsedInput }
-      delete rest.limit
-      delete rest.cursor
       const parsed = await validate(operation.input, rest)
       const ctx: Ctx = {
         signal: full.signal,

@@ -1,6 +1,6 @@
 import type { App } from "./app.ts"
 import type { Runtime } from "./app.ts"
-import type { Failure } from "./fail.ts"
+import { failurePayload } from "./fail.ts"
 import type { JsonSchema } from "./contract.ts"
 
 export type McpToolDef = {
@@ -24,21 +24,37 @@ export type McpToolResult =
   | {
       readonly isError: true
       readonly content: readonly [{ type: "text"; text: string }]
-      readonly structuredContent: { error: Failure }
+      readonly structuredContent: { error: ReturnType<typeof failurePayload> }
     }
 
+function frameworkInput(schema: JsonSchema, extras: Record<string, JsonSchema>): JsonSchema {
+  const properties =
+    schema.properties && typeof schema.properties === "object" && !Array.isArray(schema.properties)
+      ? { ...(schema.properties as Record<string, JsonSchema>) }
+      : {}
+  return { ...schema, properties: { ...properties, ...extras } }
+}
+
 export function mcpTools(app: App): readonly McpToolDef[] {
-  return app.manifest().operations.map((operation) => ({
-    name: operation.name.replaceAll(".", "_"),
-    description: operation.summary,
-    inputSchema: operation.input,
-    outputSchema: operation.output.kind === "opaque" ? undefined : operation.output.schema,
-    annotations: {
-      readOnlyHint: operation.effects === "read_only",
-      destructiveHint: operation.confirm,
-      idempotentHint: operation.effects !== "non_idempotent",
-    },
-  }))
+  return app.manifest().operations.map((operation) => {
+    const extras: Record<string, JsonSchema> = {}
+    if (operation.confirm) extras.yes = { type: "boolean" }
+    if (operation.output.kind === "data" && operation.output.cardinality === "unbounded") {
+      extras.limit = { type: "integer", minimum: 1 }
+      extras.cursor = { type: "string" }
+    }
+    return {
+      name: operation.name.replaceAll(".", "_"),
+      description: operation.summary,
+      inputSchema: Object.keys(extras).length > 0 ? frameworkInput(operation.input, extras) : operation.input,
+      outputSchema: operation.output.kind === "opaque" ? undefined : operation.output.schema,
+      annotations: {
+        readOnlyHint: operation.effects === "read_only",
+        destructiveHint: operation.confirm,
+        idempotentHint: operation.effects !== "non_idempotent",
+      },
+    }
+  })
 }
 
 export async function mcpCall(
@@ -54,7 +70,7 @@ export async function mcpCall(
     return {
       isError: true,
       content: [{ type: "text", text: outcome.failure.message }],
-      structuredContent: { error: outcome.failure },
+      structuredContent: { error: failurePayload(outcome.failure) },
     }
   }
   if (outcome.kind === "opaque") {
