@@ -1,4 +1,5 @@
 import type { App } from "./app.ts"
+import { AT_CONVENTION } from "./at.ts"
 import { kebab } from "./case.ts"
 import { EXIT_CODE } from "./fail.ts"
 import type { FailureKind } from "./fail.ts"
@@ -13,6 +14,9 @@ export type Manifest = {
   readonly summary: string
   readonly exitCodes: Readonly<Record<FailureKind, number>>
   readonly globalFlags: readonly string[]
+  readonly valueSyntax: {
+    readonly at: Pick<typeof AT_CONVENTION, "appliesTo" | "file" | "stdin" | "escape">
+  }
   readonly operations: readonly OperationManifest[]
 }
 
@@ -76,6 +80,14 @@ export function manifest(app: App, scope?: readonly string[]): Manifest {
     summary: app.spec.summary,
     exitCodes: { ...EXIT_CODE },
     globalFlags: ["json", "human", "fields", "limit", "cursor", "yes", "input", "help", "version"],
+    valueSyntax: {
+      at: {
+        appliesTo: AT_CONVENTION.appliesTo,
+        file: AT_CONVENTION.file,
+        stdin: AT_CONVENTION.stdin,
+        escape: AT_CONVENTION.escape,
+      },
+    },
     operations: operations.map((operation) => ({
       name: operation.name,
       path: operation.path,
@@ -164,7 +176,12 @@ export function helpText(app: App, scope: readonly string[]): string {
       lines.push(`      ${example.summary}`)
     }
   }
+  if (showsAtLine(operation)) lines.push("", AT_CONVENTION.helpLine)
   return lines.join("\n")
+}
+
+function showsAtLine(operation: AnyOperation): boolean {
+  return operation.inputFields.some((field) => field.type === "string")
 }
 
 export function skillMarkdown(app: App): string {
@@ -182,6 +199,10 @@ export function skillMarkdown(app: App): string {
     "## Exit codes",
     "",
     ...Object.entries(EXIT_CODE).map(([kind, code]) => `- \`${code}\` ${kind}`),
+    "",
+    "## Large inputs",
+    "",
+    ...AT_CONVENTION.agentRule.map((line) => `- ${line}`),
     "",
   ]
   let group = ""
