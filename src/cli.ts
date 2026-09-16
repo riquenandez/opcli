@@ -5,7 +5,7 @@ import { camel, kebab } from "./case.ts"
 import type { Outcome } from "./app.ts"
 import { detect, type HumanTty } from "./detect.ts"
 import { helpText, manifest } from "./docs.ts"
-import { EXIT_CODE, Fail, fail, internalFail, isFail, type ExitCode, type Failure } from "./fail.ts"
+import { EXIT_CODE, Fail, fail, failurePayload, internalFail, isFail, type ExitCode, type Failure } from "./fail.ts"
 import type { Field } from "./contract.ts"
 import type { AnyOperation, Actor } from "./operation.ts"
 import { suggest } from "./suggest.ts"
@@ -47,7 +47,6 @@ export type GlobalFlags = {
   readonly input?: string
   readonly help?: true
   readonly version?: true
-  readonly noColor?: true
   readonly token?: string
 }
 
@@ -55,9 +54,9 @@ export type Invocation =
   | { readonly kind: "run"; readonly op: AnyOperation; readonly input: Record<string, unknown>; readonly flags: GlobalFlags }
   | { readonly kind: "help"; readonly scope: readonly string[]; readonly json: boolean }
   | { readonly kind: "version" }
-  | { readonly kind: "usage_error"; readonly failure: Failure; readonly scope: readonly string[] }
+  | { readonly kind: "usage_error"; readonly failure: Failure; readonly scope: readonly string[]; readonly json: boolean }
 
-const GLOBAL_BOOL = new Set(["json", "human", "yes", "help", "version", "no-color", "noColor"])
+const GLOBAL_BOOL = new Set(["json", "human", "yes", "help", "version"])
 const GLOBAL_VALUE = new Set(["fields", "limit", "cursor", "input", "token"])
 
 type Token = { kind: "pos"; value: string } | { kind: "flag"; name: string; value: string | true }
@@ -145,7 +144,6 @@ function collectGlobals(tokens: Token[], authFlag?: string): { flags: GlobalFlag
     input?: string
     help?: true
     version?: true
-    noColor?: true
     token?: string
   } = {}
   const isGlobal = (name: string) =>
@@ -156,7 +154,7 @@ function collectGlobals(tokens: Token[], authFlag?: string): { flags: GlobalFlag
       rest.push(token)
       continue
     }
-    const name = token.name === "no-color" ? "noColor" : token.name
+    const name = token.name
     if (seen.has(name) && name !== "fields") {
       fail.usage(`repeated flag --${kebab(name)}`, { hint: "pass it once" })
     }
@@ -166,7 +164,6 @@ function collectGlobals(tokens: Token[], authFlag?: string): { flags: GlobalFlag
     else if (name === "yes") flags.yes = true
     else if (name === "help") flags.help = true
     else if (name === "version") flags.version = true
-    else if (name === "noColor") flags.noColor = true
     else if (name === "fields") {
       const text = token.value === true ? "" : token.value
       flags.fields = text.split(",").map((item) => item.trim()).filter(Boolean)
@@ -312,14 +309,16 @@ async function bindOp(
 }
 
 export async function parseArgv(app: App, argv: readonly string[], io: ProcessIO): Promise<Invocation> {
+  const tokens = tokenize(argv)
+  const json = tokens.some((token) => token.kind === "flag" && token.name === "json")
   try {
-    const tokens = tokenize(argv)
     const { flags, rest } = collectGlobals(tokens, app.spec.auth?.flag)
     if (flags.json && flags.human) {
       return {
         kind: "usage_error",
         failure: { kind: "usage", message: "--json and --human cannot be combined", hint: "pick one" },
         scope: [],
+        json,
       }
     }
     if (flags.version && !flags.help) return { kind: "version" }
@@ -335,10 +334,11 @@ export async function parseArgv(app: App, argv: readonly string[], io: ProcessIO
             hint: "run --help",
           },
           scope: found.at,
+          json,
         }
       }
       const scope = found.kind === "op" ? found.op.path : found.kind === "group" ? found.node.path : []
-      return { kind: "help", scope: [...scope], json: Boolean(flags.json) }
+      return { kind: "help", scope: [...scope], json }
     }
     if (found.kind === "miss") {
       return {
@@ -349,19 +349,35 @@ export async function parseArgv(app: App, argv: readonly string[], io: ProcessIO
           hint: "run --help",
         },
         scope: found.at,
+        json,
       }
     }
     if (found.kind === "group") {
       if (found.node.path.length === 0 && rest.length === 0) {
-        return { kind: "help", scope: [], json: Boolean(flags.json) }
+        return { kind: "help", scope: [], json }
       }
-      return { kind: "help", scope: [...found.node.path], json: Boolean(flags.json) }
+      return { kind: "help", scope: [...found.node.path], json }
     }
     const leftover = stripPath(rest, found.op.path)
-    if (flags.fields && found.op.output.kind !== "opaque") {
+    if (flags.fields && (found.op.output.kind === "opaque" || found.op.output.kind === "stream")) {
+      const streamed = found.op.output.kind === "stream"
+      return {
+        kind: "usage_error",
+        failure: {
+          kind: "usage",
+          message: streamed
+            ? `"${found.op.name.replaceAll(".", " ")}" streams records; --fields does not apply`
+            : `"${found.op.name.replaceAll(".", " ")}" emits raw ${found.op.output.mediaType} bytes; --fields does not apply`,
+          hint: streamed ? "omit --fields" : "redirect stdout to a file",
+        },
+        scope: found.op.path,
+        json,
+      }
+    }
+    if (flags.fields) {
       checkFields(found.op.outputFields, flags.fields)
     }
-    if (found.op.output.kind === "opaque" && (flags.json || flags.human || flags.fields)) {
+    if (found.op.output.kind === "opaque" && (flags.json || flags.human)) {
       return {
         kind: "usage_error",
         failure: {
@@ -370,19 +386,20 @@ export async function parseArgv(app: App, argv: readonly string[], io: ProcessIO
           hint: "redirect stdout to a file",
         },
         scope: found.op.path,
+        json,
       }
     }
     const bound = await bindOp(found.op, leftover, flags, io, app.pagination)
     return { kind: "run", op: found.op, input: bound.input, flags: { ...flags, input: bound.fromStdin ? "@-" : flags.input } }
   } catch (error) {
     if (isFail(error)) {
-      return { kind: "usage_error", failure: error, scope: [] }
+      return { kind: "usage_error", failure: error, scope: [], json }
     }
     throw error
   }
 }
 
-export function resolveMode(kind: "data" | "stream" | "opaque", flags: GlobalFlags, stdoutIsTTY: boolean): Mode | Fail {
+export function resolveMode(kind: "data" | "stream" | "opaque", flags: GlobalFlags, actor: Actor): Mode | Fail {
   if (flags.json && flags.human) {
     return new Fail({ kind: "usage", message: "--json and --human cannot be combined", hint: "pick one" })
   }
@@ -396,13 +413,14 @@ export function resolveMode(kind: "data" | "stream" | "opaque", flags: GlobalFla
     }
     return "raw"
   }
+  const machine = Boolean(flags.json) || actor !== "human"
   if (kind === "stream") {
     if (flags.human) return "human"
-    if (flags.json || !stdoutIsTTY) return "ndjson"
+    if (machine) return "ndjson"
     return "human"
   }
   if (flags.human) return "human"
-  if (flags.json || !stdoutIsTTY) return "json"
+  if (machine) return "json"
   return "human"
 }
 
@@ -425,11 +443,26 @@ function cell(value: unknown, format?: string): string {
   return String(value)
 }
 
+function at(value: unknown, path: string): unknown {
+  let current: unknown = value
+  for (const part of path.split(".")) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined
+    current = (current as Record<string, unknown>)[part]
+  }
+  return current
+}
+
+function formatOf(fields: readonly Field[] | undefined, path: string): string | undefined {
+  if (path.includes(".")) return undefined
+  return fields?.find((field) => field.name === path)?.format
+}
+
 function table(rows: Record<string, unknown>[], columns: readonly string[], fields?: readonly Field[]): string {
   if (rows.length === 0) return ""
-  const formats = new Map(fields?.map((field) => [field.name, field.format] as const))
   const header = columns.map((col) => col.toUpperCase())
-  const body = rows.map((row) => columns.map((col) => cell(row[col], formats.get(col))))
+  const body = rows.map((row) =>
+    columns.map((col) => cell(at(row, col), formatOf(fields, col))),
+  )
   const widths = columns.map((_, i) =>
     Math.max(header[i]?.length ?? 0, ...body.map((line) => line[i]?.length ?? 0)),
   )
@@ -437,16 +470,16 @@ function table(rows: Record<string, unknown>[], columns: readonly string[], fiel
   return [fmt(header), ...body.map(fmt)].join("\n")
 }
 
-function kv(value: Record<string, unknown>, fields?: readonly Field[]): string {
-  const formats = new Map(fields?.map((field) => [field.name, field.format] as const))
-  return Object.entries(value)
-    .map(([key, item]) => `${key}: ${cell(item, formats.get(key))}`)
+function kv(value: Record<string, unknown>, fields?: readonly Field[], columns?: readonly string[]): string {
+  const keys = columns && columns.length > 0 ? columns : Object.keys(value)
+  return keys
+    .map((key) => `${key}: ${cell(at(value, key), formatOf(fields, key))}`)
     .join("\n")
 }
 
 async function writeError(failure: Failure, json: boolean, io: ProcessIO): Promise<ExitCode> {
   if (json) {
-    await io.stderr.write(`${JSON.stringify({ error: { kind: failure.kind, message: failure.message, hint: failure.hint, details: failure.details } })}\n`)
+    await io.stderr.write(`${JSON.stringify({ error: failurePayload(failure) })}\n`)
   } else {
     await io.stderr.write(`error[${failure.kind}]: ${failure.message}\n`)
     if (failure.hint) await io.stderr.write(`  hint: ${failure.hint}\n`)
@@ -454,8 +487,7 @@ async function writeError(failure: Failure, json: boolean, io: ProcessIO): Promi
   return EXIT_CODE[failure.kind]
 }
 
-export async function render(outcome: Outcome, opts: { mode: Mode; color: boolean; fields?: readonly string[] }, io: ProcessIO, operation?: AnyOperation): Promise<ExitCode> {
-  void opts.color
+export async function render(outcome: Outcome, opts: { mode: Mode; fields?: readonly string[] }, io: ProcessIO, operation?: AnyOperation): Promise<ExitCode> {
   if (outcome.kind === "failure") {
     return writeError(outcome.failure, opts.mode === "json" || opts.mode === "ndjson" || !io.stdout.isTTY, io)
   }
@@ -488,7 +520,7 @@ export async function render(outcome: Outcome, opts: { mode: Mode; color: boolea
   const fields = operation?.outputFields
   const columns = opts.fields ?? fields?.map((field) => field.name) ?? []
   if (outcome.cardinality === "single") {
-    await io.stdout.write(`${kv(asRecord(outcome.value), fields)}\n`)
+    await io.stdout.write(`${kv(asRecord(outcome.value), fields, opts.fields)}\n`)
     return 0
   }
   const rows = Array.isArray(outcome.value) ? outcome.value.map(asRecord) : []
@@ -549,24 +581,6 @@ function redirectConsole(write: (line: string) => void): () => void {
 
 export async function main(app: App, io = processIO()): Promise<ExitCode> {
   const inv = await parseArgv(app, io.argv.slice(2), io)
-  const jsonDefault = !io.stdout.isTTY
-  if (inv.kind === "version") {
-    await io.stdout.write(`${app.spec.name} ${app.spec.version}\n`)
-    return 0
-  }
-  if (inv.kind === "help") {
-    if (inv.json) await io.stdout.write(`${JSON.stringify(manifest(app, inv.scope), null, 2)}\n`)
-    else await io.stdout.write(`${helpText(app, inv.scope, false)}\n`)
-    return 0
-  }
-  if (inv.kind === "usage_error") {
-    const json = jsonDefault || false
-    const code = await writeError(inv.failure, json, io)
-    if (!json) await io.stderr.write(`\n${helpText(app, inv.scope, false)}\n`)
-    return code
-  }
-  const mode = resolveMode(inv.op.output.kind, inv.flags, io.stdout.isTTY)
-  if (mode instanceof Fail) return writeError(mode, jsonDefault || Boolean(inv.flags.json), io)
   const detection = detect(
     {
       env: io.env,
@@ -577,6 +591,24 @@ export async function main(app: App, io = processIO()): Promise<ExitCode> {
     },
     app.spec.agentEnv,
   )
+  const machine = detection.actor !== "human"
+  if (inv.kind === "version") {
+    await io.stdout.write(`${app.spec.name} ${app.spec.version}\n`)
+    return 0
+  }
+  if (inv.kind === "help") {
+    if (inv.json) await io.stdout.write(`${JSON.stringify(manifest(app, inv.scope), null, 2)}\n`)
+    else await io.stdout.write(`${helpText(app, inv.scope)}\n`)
+    return 0
+  }
+  if (inv.kind === "usage_error") {
+    const json = inv.json || machine
+    const code = await writeError(inv.failure, json, io)
+    if (!json) await io.stderr.write(`\n${helpText(app, inv.scope)}\n`)
+    return code
+  }
+  const mode = resolveMode(inv.op.output.kind, inv.flags, detection.actor)
+  if (mode instanceof Fail) return writeError(mode, Boolean(inv.flags.json) || machine, io)
   const usedStdinBody = inv.flags.input === "@-"
   let confirmed = Boolean(inv.flags.yes)
   if (inv.op.confirm && !confirmed) {
@@ -614,7 +646,7 @@ export async function main(app: App, io = processIO()): Promise<ExitCode> {
       },
     }, { fields: inv.flags.fields })
     if (signalExit) return signalExit
-    return await render(outcome, { mode, color: detection.color && !inv.flags.noColor, fields: inv.flags.fields }, io, inv.op)
+    return await render(outcome, { mode, fields: inv.flags.fields }, io, inv.op)
   } catch (error) {
     return writeError(internalFail(error), mode === "json" || mode === "ndjson", io)
   } finally {
@@ -697,6 +729,17 @@ function concat(chunks: Uint8Array[]): Uint8Array {
   return out
 }
 
+export async function readLineFrom(source: AsyncIterable<Uint8Array | string>): Promise<string> {
+  let buf = ""
+  const decoder = new TextDecoder()
+  for await (const chunk of source) {
+    buf += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true })
+    const nl = buf.search(/\r?\n/)
+    if (nl >= 0) return buf.slice(0, nl).trim()
+  }
+  return buf.trim()
+}
+
 export function processIO(): ProcessIO {
   const env = process.env
   return {
@@ -708,9 +751,7 @@ export function processIO(): ProcessIO {
       text: async () => new Response(process.stdin as unknown as ReadableStream).text(),
       question: async (prompt) => {
         process.stderr.write(prompt)
-        const chunks: Buffer[] = []
-        for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
-        return Buffer.concat(chunks).toString("utf8").trim()
+        return readLineFrom(process.stdin)
       },
     },
     stdout: {

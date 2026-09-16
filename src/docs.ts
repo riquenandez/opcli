@@ -74,8 +74,8 @@ export function manifest(app: App, scope?: readonly string[]): Manifest {
     name: app.spec.name,
     version: app.spec.version,
     summary: app.spec.summary,
-    exitCodes: { user: 1, usage: 2, auth: 3, network: 4, internal: 5 },
-    globalFlags: ["json", "human", "fields", "limit", "cursor", "yes", "input", "help", "version", "no-color"],
+    exitCodes: { ...EXIT_CODE },
+    globalFlags: ["json", "human", "fields", "limit", "cursor", "yes", "input", "help", "version"],
     operations: operations.map((operation) => ({
       name: operation.name,
       path: operation.path,
@@ -112,7 +112,7 @@ function operationsOf(app: App): AnyOperation[] {
   return found
 }
 
-export function helpText(app: App, scope: readonly string[], _color: boolean): string {
+export function helpText(app: App, scope: readonly string[]): string {
   const found = app.find(scope)
   const lines: string[] = []
   if (found.kind === "miss") {
@@ -154,10 +154,11 @@ export function helpText(app: App, scope: readonly string[], _color: boolean): s
     lines.push(`  ${flag} ${type}`.trimEnd().padEnd(32) + (field.description ?? "") + extra)
   }
   if (operation.output.kind === "data" && operation.output.cardinality === "unbounded") {
-    lines.push("  --limit <int>                   Page size (default 50, max 200)")
+    const { defaultLimit, maxLimit } = app.pagination
+    lines.push(`  --limit <int>                   Page size (default ${defaultLimit}, max ${maxLimit})`)
     lines.push("  --cursor <string>               Continue from meta.nextCursor")
   }
-  if (operation.output.kind !== "opaque") {
+  if (operation.output.kind === "data") {
     lines.push("  --fields <a,b,c>                Project output to these fields")
   }
   if (operation.confirm) lines.push("  --yes                           Confirm a destructive operation")
