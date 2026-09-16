@@ -67,6 +67,7 @@ const cli = app({
   version: "0.1.0",
   summary: "Demo",
   pagination: { defaultLimit: 10, maxLimit: 20 },
+  groups: { items: "Demo items", logs: "Demo logs" },
   operations: [list, get, del, tail],
 })
 

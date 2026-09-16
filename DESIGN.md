@@ -14,6 +14,8 @@ The core type is `Operation`: input contract, five-way `OutputContract` (`data/s
 
 Public surface: `op`, `out`, `fail`, `app`, plus `Ctx` / `Credential` / `Page` / `Contract`, plus `opcli/mcp`. Trace: `cli.ts` → `app.ts` → handler.
 
+Command names are a tree keyed by dotted segments. Occupancy is a `ReadonlyMap<Segment, TreeNode>`: one child per last segment, so `projects` and `projects.list` cannot both exist. `AppSpec.groups` captions those prefixes by full path, exhaustively both ways. Construction throws `fail.usage` with `details.problems`; there is no `"<name> commands"` fallback. `TreeNode` is not on the package export list.
+
 ## Synthesis decision
 
 Arena base: candidate 1 (opcli / contract-first). Cross-judge agreed. Candidates 2 and 3 failed to type-check their own usage. Candidate 4 (flint) was the stronger artifact on size, but restates `wire` + enum-in-`describe`, which is the help/parser drift the article forbids, and checks `--fields` after the handler (double-delete on mutations).
@@ -22,6 +24,8 @@ Grafted from flint: drop `ok()`/`Result`; `fail.*` returns `never`; `internal` �
 
 Rejected: resource DSL, bytes-only `invoke` seam, `arg`/`flag`/`wire` restatement, builtin login/logout.
 
+Tree uniqueness arena: base C1 (flat full-path `groups` keys, Map occupancy). Grafted unused-key-names-an-operation and `children.entries()` from C4; empty-summary rejection from C3; aggregated missing-key hint from C2. Rejected C2 nested `{ summary, groups }` (authors the tree twice), C3 delete `groups` (breaks `examples/work.ts`), C4 one-dot cap (forbids `projects.comments`).
+
 ## Tradeoffs accepted
 
 - We accept requiring Standard JSON Schema emission (Zod 4, Valibot, ArkType, or `withJsonSchema`) in exchange for owning zero schema vocabulary.
@@ -29,6 +33,7 @@ Rejected: resource DSL, bytes-only `invoke` seam, `arg`/`flag`/`wire` restatemen
 - We accept no custom human renderer in exchange for one implementation of every command.
 - We accept no short flags in exchange for argv that cannot mean two things.
 - We accept keychain-read as a `ProcessIO` slot with a no-op default in exchange for not taking a native dependency in v1.
+- We accept exhaustive `groups` keys (and author-time breakage in `examples/hi.ts`) in exchange for never inventing a group caption and never colliding two nested `comments` groups.
 
 ## Alternatives considered
 
@@ -36,6 +41,9 @@ Rejected: resource DSL, bytes-only `invoke` seam, `arg`/`flag`/`wire` restatemen
 - **Resource / noun-verb DSL.** Two command trees and a closed filter vocabulary. Own usage did not compile. Lost.
 - **POSIX kernel with per-flag `parse`.** Authors restate types; `invoke` returns bytes. Core generic did not infer. Lost.
 - **Handlers returning `Result`.** Two failure paths (`return` and `throw`). Dropped in synthesis.
+- **Nested `{ summary, groups }` (C2).** Second tree shape next to dotted names. Lost on interface depth.
+- **Delete `groups`, put `groupSummary` on ops (C3).** `examples/work.ts` and the README become a migration, not a caption fix. Lost.
+- **One-dot names / two-level registry (C4).** Solves nested-comments by forbidding nesting. Lost.
 
 ## Open questions and risks
 
@@ -45,4 +53,4 @@ Rejected: resource DSL, bytes-only `invoke` seam, `arg`/`flag`/`wire` restatemen
 
 ## Next implementation step
 
-Done: construction, parser, invoke, JSON/human/NDJSON/opaque, pagination injection, pre-handler `--fields`, confirm/`--yes`, `@path`, whoami, help/manifest/skill, in-process `run()`, type tests.
+Done: construction, parser, invoke, JSON/human/NDJSON/opaque, pagination injection, pre-handler `--fields`, confirm/`--yes`, `@path`, whoami, help/manifest/skill, in-process `run()`, type tests, prefix uniqueness, exhaustive full-path `groups`.

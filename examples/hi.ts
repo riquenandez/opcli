@@ -43,6 +43,7 @@ export const cli = app({
   name: "hi",
   version: "0.1.0",
   summary: "Tiny task CLI",
+  groups: { tasks: "Tiny task list" },
   operations: [list, get],
 })
 
