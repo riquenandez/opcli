@@ -1,0 +1,447 @@
+import { camel, kebab } from "./case.ts"
+import { passthrough, schemaFingerprint, validate } from "./contract.ts"
+import type { Field } from "./contract.ts"
+import { skillMarkdown, manifest as buildManifest } from "./docs.ts"
+import type { Manifest } from "./docs.ts"
+import { fail, Fail, isFail } from "./fail.ts"
+import { Whoami, tokenPrefix, type AuthSpec } from "./auth.ts"
+import {
+  op,
+  out,
+  type Actor,
+  type AnyOperation,
+  type AuthNeed,
+  type Credential,
+  type Ctx,
+  type Page,
+} from "./operation.ts"
+import { suggest } from "./suggest.ts"
+
+export type { AuthSpec }
+
+export type AppSpec = {
+  readonly name: string
+  readonly version: string
+  readonly summary: string
+  readonly operations: readonly AnyOperation[]
+  readonly groups?: Readonly<Record<string, string>>
+  readonly auth?: AuthSpec
+  readonly pagination?: { readonly defaultLimit: number; readonly maxLimit: number }
+  readonly agentEnv?: readonly string[]
+}
+
+export type TreeNode =
+  | {
+      readonly kind: "group"
+      readonly path: readonly string[]
+      readonly summary: string
+      readonly children: readonly TreeNode[]
+    }
+  | { readonly kind: "op"; readonly op: AnyOperation }
+
+export type Found =
+  | { readonly kind: "op"; readonly op: AnyOperation; readonly rest: readonly string[] }
+  | { readonly kind: "group"; readonly node: Extract<TreeNode, { kind: "group" }>; readonly rest: readonly string[] }
+  | {
+      readonly kind: "miss"
+      readonly at: readonly string[]
+      readonly token: string
+      readonly suggestions: readonly string[]
+    }
+
+export type Runtime = {
+  readonly signal: AbortSignal
+  readonly auth: Credential | null
+  readonly confirmed: boolean
+  readonly actor: Actor
+  note(message: string): void
+}
+
+export type PageMeta = {
+  readonly nextCursor: string | null
+  readonly truncated?: true
+}
+
+export type Outcome =
+  | { readonly kind: "data"; readonly cardinality: "single" | "bounded" | "unbounded"; readonly value: unknown; readonly meta?: PageMeta }
+  | { readonly kind: "stream"; readonly items: AsyncIterable<unknown> }
+  | { readonly kind: "opaque"; readonly mediaType: string; readonly bytes: Uint8Array | ReadableStream<Uint8Array> }
+  | { readonly kind: "failure"; readonly failure: import("./fail.ts").Failure }
+
+export type InvokeOptions = {
+  readonly fields?: readonly string[]
+}
+
+export type App = {
+  readonly spec: AppSpec
+  readonly pagination: { readonly defaultLimit: number; readonly maxLimit: number }
+  invoke(name: string, input: unknown, runtime: Partial<Runtime>, opts?: InvokeOptions): Promise<Outcome>
+  invoke(op: AnyOperation, input: unknown, runtime: Runtime, opts?: InvokeOptions): Promise<Outcome>
+  find(tokens: readonly string[]): Found
+  main(io?: import("./cli.ts").ProcessIO): Promise<import("./fail.ts").ExitCode>
+  run(argv: readonly string[], io?: import("./cli.ts").TestIO): Promise<import("./cli.ts").RunResult>
+  manifest(scope?: readonly string[]): Manifest
+  skill(): string
+}
+
+function siblings(node: Extract<TreeNode, { kind: "group" }>): string[] {
+  return node.children.map((child) =>
+    child.kind === "group" ? (child.path[child.path.length - 1] ?? "") : (child.op.path[child.op.path.length - 1] ?? ""),
+  )
+}
+
+function walk(
+  node: Extract<TreeNode, { kind: "group" }>,
+  tokens: readonly string[],
+  at: readonly string[],
+): Found {
+  if (tokens.length === 0) return { kind: "group", node, rest: [] }
+  const [head, ...tail] = tokens
+  if (!head) return { kind: "group", node, rest: [] }
+  const child = node.children.find((item) => {
+    const name = item.kind === "group" ? item.path[item.path.length - 1] : item.op.path[item.op.path.length - 1]
+    return name === head
+  })
+  if (!child) {
+    return {
+      kind: "miss",
+      at,
+      token: head,
+      suggestions: suggest(head, siblings(node)) ? [suggest(head, siblings(node))!] : [],
+    }
+  }
+  if (child.kind === "op") return { kind: "op", op: child.op, rest: tail }
+  return walk(child, tail, [...at, head])
+}
+
+function buildTree(spec: AppSpec, operations: readonly AnyOperation[]): Extract<TreeNode, { kind: "group" }> {
+  type MutableGroup = {
+    kind: "group"
+    path: string[]
+    summary: string
+    children: Array<MutableGroup | { kind: "op"; op: AnyOperation }>
+  }
+  const root: MutableGroup = {
+    kind: "group",
+    path: [],
+    summary: spec.summary,
+    children: [],
+  }
+  const groups = new Map<string, MutableGroup>([[ "", root ]])
+
+  const ensure = (path: string[]): MutableGroup => {
+    const key = path.join(".")
+    const existing = groups.get(key)
+    if (existing) return existing
+    const parent = ensure(path.slice(0, -1))
+    const name = path[path.length - 1] ?? ""
+    const group: MutableGroup = {
+      kind: "group",
+      path,
+      summary: spec.groups?.[name] ?? `${name} commands`,
+      children: [],
+    }
+    parent.children.push(group)
+    groups.set(key, group)
+    return group
+  }
+
+  for (const operation of operations) {
+    const parentPath = operation.path.slice(0, -1)
+    const parent = ensure(parentPath)
+    parent.children.push({ kind: "op", op: operation })
+  }
+
+  const freeze = (node: MutableGroup): Extract<TreeNode, { kind: "group" }> => ({
+    kind: "group",
+    path: node.path,
+    summary: node.summary,
+    children: node.children
+      .map((child) => (child.kind === "group" ? freeze(child) : child))
+      .sort((a, b) => {
+        const an = a.kind === "group" ? a.path[a.path.length - 1] ?? "" : a.op.path[a.op.path.length - 1] ?? ""
+        const bn = b.kind === "group" ? b.path[b.path.length - 1] ?? "" : b.op.path[b.op.path.length - 1] ?? ""
+        return an.localeCompare(bn)
+      }),
+  })
+  return freeze(root)
+}
+
+function checkFlagConsistency(operations: readonly AnyOperation[]): void {
+  const seen = new Map<string, { fingerprint: string; op: string }>()
+  for (const operation of operations) {
+    for (const field of operation.inputFields) {
+      const fingerprint = schemaFingerprint(operation.input, field.name)
+      const prior = seen.get(field.name)
+      if (prior && prior.fingerprint !== fingerprint) {
+        fail.usage(`flag --${kebab(field.name)} means different things on ${prior.op} and ${operation.name}`, {
+          hint: "the same flag name must share the same type, enum, and format",
+        })
+      }
+      if (!prior) seen.set(field.name, { fingerprint, op: operation.name })
+    }
+  }
+}
+
+function projectValue(value: unknown, fields: readonly string[]): unknown {
+  if (Array.isArray(value)) return value.map((item) => projectValue(item, fields))
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>
+    const next: Record<string, unknown> = {}
+    for (const field of fields) {
+      if (field.includes(".")) {
+        const [head, ...rest] = field.split(".")
+        if (head && head in record) next[head] = projectValue(record[head], [rest.join(".")])
+      } else if (field in record) {
+        next[field] = record[field]
+      }
+    }
+    return next
+  }
+  return value
+}
+
+export function checkFields(fields: readonly Field[], requested: readonly string[]): void {
+  const allowed = fields.map((field) => field.name)
+  for (const name of requested) {
+    const top = name.split(".")[0] ?? name
+    if (!allowed.includes(top)) {
+      const did = suggest(top, allowed)
+      fail.usage(`unknown field "${name}"${did ? `. Did you mean "${did}"?` : ""}`, {
+        hint: `fields: ${allowed.join(", ")}`,
+        details: { fields: allowed },
+      })
+    }
+  }
+}
+
+async function validateProduced(op: AnyOperation, produced: unknown): Promise<void> {
+  const output = op.output
+  if (output.kind === "opaque") return
+  if (output.kind === "stream") return
+  if (output.kind === "data" && output.cardinality === "single") {
+    await validate(output.schema, produced)
+    return
+  }
+  if (output.kind === "data" && output.cardinality === "bounded") {
+    if (!Array.isArray(produced)) fail.usage("bounded handler must return an array")
+    const items = produced as unknown[]
+    for (const item of items) await validate(output.schema, item)
+    return
+  }
+  const page = produced as Page<unknown>
+  if (!page || !Array.isArray(page.items)) fail.usage("unbounded handler must return { items, nextCursor }")
+  for (const item of page.items) await validate(output.schema, item)
+}
+
+function toOutcome(op: AnyOperation, produced: unknown, fields?: readonly string[]): Outcome {
+  const output = op.output
+  if (output.kind === "opaque") {
+    return { kind: "opaque", mediaType: output.mediaType, bytes: produced as Uint8Array | ReadableStream<Uint8Array> }
+  }
+  if (output.kind === "stream") {
+    return { kind: "stream", items: produced as AsyncIterable<unknown> }
+  }
+  if (output.kind === "data" && output.cardinality === "single") {
+    const value = fields ? projectValue(produced, fields) : produced
+    return { kind: "data", cardinality: "single", value }
+  }
+  if (output.kind === "data" && output.cardinality === "bounded") {
+    const value = fields ? projectValue(produced, fields) : produced
+    return { kind: "data", cardinality: "bounded", value }
+  }
+  const page = produced as Page<unknown>
+  const value = fields ? projectValue(page.items, fields) : page.items
+  return {
+    kind: "data",
+    cardinality: "unbounded",
+    value,
+    meta: {
+      nextCursor: page.nextCursor ?? null,
+      truncated: page.truncated,
+    },
+  }
+}
+
+export function app(spec: AppSpec): App {
+  const pagination = spec.pagination ?? { defaultLimit: 50, maxLimit: 200 }
+  const holder: { app?: App; tree?: Extract<TreeNode, { kind: "group" }>; operations: AnyOperation[] } = {
+    operations: [],
+  }
+
+  const userOps = [...spec.operations]
+  const names = new Set<string>()
+  for (const operation of userOps) {
+    if (names.has(operation.name)) fail.usage(`duplicate operation "${operation.name}"`)
+    names.add(operation.name)
+  }
+  checkFlagConsistency(userOps)
+
+  const authFlag = spec.auth?.flag
+  if (authFlag) {
+    for (const operation of userOps) {
+      if (operation.inputFields.some((field) => field.name === authFlag || camel(field.name) === authFlag)) {
+        fail.usage(`input field collides with auth flag --${kebab(authFlag)}`)
+      }
+    }
+  }
+
+  const builtins: AnyOperation[] = []
+  if (spec.auth) {
+    builtins.push(
+      op({
+        name: "auth.whoami",
+        summary: "Show which credential is in use",
+        input: passthrough<Record<string, never>>({ type: "object", properties: {} }),
+        output: out.single(Whoami),
+        effects: "read_only",
+        auth: "optional",
+        examples: [{ summary: "Inspect credential", input: {} }],
+        run(_input, ctx) {
+          return {
+            source: ctx.auth?.source ?? null,
+            via: ctx.auth?.via ?? null,
+            tokenPrefix: ctx.auth ? tokenPrefix(ctx.auth.token) : null,
+            actor: ctx.actor,
+          }
+        },
+      }),
+    )
+  }
+
+  const ManifestSchema = passthrough<unknown>({ type: "object" })
+  builtins.push(
+    op({
+      name: "manifest",
+      summary: "Print the machine-readable command tree",
+      input: passthrough<Record<string, never>>({ type: "object", properties: {} }),
+      output: out.single(ManifestSchema),
+      effects: "read_only",
+      auth: "none",
+      examples: [{ summary: "Dump manifest", input: {} }],
+      run() {
+        return holder.app!.manifest()
+      },
+    }),
+    op({
+      name: "skill",
+      summary: "Print the agent playbook",
+      input: passthrough<Record<string, never>>({ type: "object", properties: {} }),
+      output: out.opaque("text/markdown"),
+      effects: "read_only",
+      auth: "none",
+      examples: [{ summary: "Write SKILL.md", input: {} }],
+      async run() {
+        return new TextEncoder().encode(holder.app!.skill())
+      },
+    }),
+  )
+
+  const operations = [...userOps, ...builtins]
+  holder.operations = operations
+  const tree = buildTree(spec, operations)
+  holder.tree = tree
+
+  const find = (tokens: readonly string[]): Found => walk(tree, tokens, [])
+
+  const invoke = async (
+    target: string | AnyOperation,
+    input: unknown,
+    runtime: Partial<Runtime> | Runtime,
+    opts?: InvokeOptions,
+  ): Promise<Outcome> => {
+    const operation =
+      typeof target === "string"
+        ? operations.find((item) => item.name === target)
+        : target
+    if (!operation) {
+      return {
+        kind: "failure",
+        failure: { kind: "usage", message: `unknown operation "${String(target)}"`, hint: "run --help" },
+      }
+    }
+    const full: Runtime = {
+      signal: runtime.signal ?? new AbortController().signal,
+      auth: runtime.auth ?? null,
+      confirmed: runtime.confirmed ?? false,
+      actor: runtime.actor ?? "agent",
+      note: runtime.note ?? (() => {}),
+    }
+    try {
+      if (opts?.fields && operation.output.kind !== "opaque") {
+        checkFields(operation.outputFields, opts.fields)
+      }
+      const need: AuthNeed = operation.auth ?? (spec.auth ? "required" : "none")
+      if (need === "required" && !full.auth) {
+        fail.auth(`no credential found for ${spec.name}`, {
+          hint: spec.auth
+            ? `set ${spec.auth.env}, pass --${spec.auth.flag ?? "token"}, or provide a config token`
+            : "configure auth",
+        })
+      }
+      if (operation.confirm && !full.confirmed) {
+        const message =
+          typeof operation.confirm === "function"
+            ? operation.confirm(input as never)
+            : operation.confirm
+        fail.usage(`"${operation.name.replaceAll(".", " ")}" is destructive and requires --yes when no person is at the terminal`, {
+          hint: `${spec.name} ${operation.path.join(" ")} --yes`,
+          details: { confirm: message },
+        })
+      }
+      const parsedInput = { ...((input ?? {}) as Record<string, unknown>) }
+      const pageLimit = parsedInput.limit
+      const pageCursor = parsedInput.cursor
+      const rest = { ...parsedInput }
+      delete rest.limit
+      delete rest.cursor
+      const parsed = await validate(operation.input, rest)
+      const ctx: Ctx = {
+        signal: full.signal,
+        auth: full.auth,
+        actor: full.actor,
+        note: full.note,
+      }
+      const handlerInput =
+        operation.output.kind === "data" && operation.output.cardinality === "unbounded"
+          ? {
+              ...(parsed as object),
+              limit:
+                typeof pageLimit === "number"
+                  ? pageLimit
+                  : pagination.defaultLimit,
+              cursor: typeof pageCursor === "string" ? pageCursor : undefined,
+            }
+          : parsed
+      const produced = await operation.run(handlerInput as never, ctx)
+      await validateProduced(operation, produced)
+      return toOutcome(operation, produced, opts?.fields)
+    } catch (error) {
+      const failure = isFail(error) ? error : new Fail({
+        kind: "internal",
+        message: error instanceof Error ? error.message : String(error),
+        hint: `this is a bug in ${spec.name}; rerun with OPCLI_DEBUG=1 for a stack`,
+      })
+      return { kind: "failure", failure }
+    }
+  }
+
+  const self: App = {
+    spec,
+    pagination,
+    invoke: invoke as App["invoke"],
+    find,
+    main: async (io) => {
+      const { main } = await import("./cli.ts")
+      return main(self, io)
+    },
+    run: async (argv, io) => {
+      const { run } = await import("./cli.ts")
+      return run(self, argv, io)
+    },
+    manifest: (scope) => buildManifest(self, scope),
+    skill: () => skillMarkdown(self),
+  }
+  holder.app = self
+  return self
+}
