@@ -116,7 +116,7 @@ Errors never touch stdout. Exit codes: `0` ok, `1` user, `2` usage, `3` auth, `4
 | Field projection fails on unknown fields | `--fields` is checked against the output schema **before** the handler runs. |
 | Never block when not a human | `confirm` prompts only with a `HumanTty`. Otherwise `--yes` or exit 2. `@-` plus confirm is non-interactive. |
 | Mutations return the object | There is no `out.message()`. |
-| Large bodies via file | String flags accept `@path` and `@-`. `@@` escapes. |
+| Large bodies via file | String values and `--input` accept `@path` and `@-`. `@@` escapes. Missing files are usage errors. `@-` may appear once. |
 | Help / skill cannot drift | Both are projections of the operation list. `ucho skill`, `ucho --help --json`. |
 | Same flag, same meaning | `app()` throws if two operations share a flag name with different schemas. |
 | Auth is inspectable | `ucho auth whoami` shows `source` and `via`. Precedence: flag > env > config > keychain-read. |

@@ -12,6 +12,8 @@ See `README.md`. Authors write `op({ name, summary, input, args?, output, effect
 
 The core type is `Operation`: input contract, five-way `OutputContract` (`data/single|bounded|unbounded`, `stream`, `opaque`), effects, required examples, handler. `Produces<Out>` and injected `PageInput` for unbounded ops are computed from the output contract. `App.invoke` validates input, gates auth and confirmation, runs the handler, validates output, projects `--fields` (checked before the handler). `cli.ts` owns POSIX conventions and is the only stdout writer.
 
+String argv values expand `@path` / `@-` / `@@` in `src/at.ts` (`ArgvValues.text`). Handlers and MCP see contents, never paths. There is no `--file` global: `documents create --file` is an author field named `file`.
+
 Public surface: `op`, `out`, `fail`, `app`, plus `Ctx` / `Credential` / `Page` / `Contract`, plus `opcli/mcp`. Trace: `cli.ts` → `app.ts` → handler.
 
 Command names are a tree keyed by dotted segments. Occupancy is a `ReadonlyMap<Segment, TreeNode>`: one child per last segment, so `projects` and `projects.list` cannot both exist. `AppSpec.groups` captions those prefixes by full path, exhaustively both ways. Construction throws `fail.usage` with `details.problems`; there is no `"<name> commands"` fallback. `TreeNode` is not on the package export list.
@@ -53,4 +55,4 @@ Tree uniqueness arena: base C1 (flat full-path `groups` keys, Map occupancy). Gr
 
 ## Next implementation step
 
-Done: construction, parser, invoke, JSON/human/NDJSON/opaque, pagination injection, pre-handler `--fields`, confirm/`--yes`, `@path`, whoami, help/manifest/skill, in-process `run()`, type tests, prefix uniqueness, exhaustive full-path `groups`.
+Done: construction, parser, invoke, JSON/human/NDJSON/opaque, pagination injection, pre-handler `--fields`, confirm/`--yes`, `@path`/`@-`/`@@` via `ArgvValues`, whoami, help/manifest/skill, in-process `run()`, type tests, prefix uniqueness, exhaustive full-path `groups`.

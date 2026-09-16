@@ -1,6 +1,7 @@
 import { resolveCredential } from "./auth.ts"
 import type { App } from "./app.ts"
 import { checkFields } from "./app.ts"
+import { argvValues, type StdinUse } from "./at.ts"
 import { camel, kebab } from "./case.ts"
 import type { Outcome } from "./app.ts"
 import { detect, type HumanTty } from "./detect.ts"
@@ -50,8 +51,16 @@ export type GlobalFlags = {
   readonly token?: string
 }
 
+export type RunFlags = Omit<GlobalFlags, "input">
+
 export type Invocation =
-  | { readonly kind: "run"; readonly op: AnyOperation; readonly input: Record<string, unknown>; readonly flags: GlobalFlags }
+  | {
+      readonly kind: "run"
+      readonly op: AnyOperation
+      readonly input: Record<string, unknown>
+      readonly flags: RunFlags
+      readonly stdin: StdinUse
+    }
   | { readonly kind: "help"; readonly scope: readonly string[]; readonly json: boolean }
   | { readonly kind: "version" }
   | { readonly kind: "usage_error"; readonly failure: Failure; readonly scope: readonly string[]; readonly json: boolean }
@@ -178,20 +187,6 @@ function collectGlobals(tokens: Token[], authFlag?: string): { flags: GlobalFlag
   return { flags, rest }
 }
 
-async function expandAt(
-  value: string,
-  io: ProcessIO,
-): Promise<{ text: string; fromStdin: boolean }> {
-  if (value.startsWith("@@")) return { text: value.slice(1), fromStdin: false }
-  if (value === "@-") return { text: await io.stdin.text(), fromStdin: true }
-  if (value.startsWith("@")) {
-    const path = value.slice(1)
-    const resolved = path.startsWith("/") ? path : `${io.cwd.replace(/\/+$/, "")}/${path}`
-    return { text: await io.readFile(resolved), fromStdin: false }
-  }
-  return { text: value, fromStdin: false }
-}
-
 function coerce(field: Field, raw: string): unknown {
   if (field.type === "boolean") {
     if (raw === "true" || raw === "1") return true
@@ -211,23 +206,21 @@ async function bindOp(
   operation: AnyOperation,
   tokens: Token[],
   flags: GlobalFlags,
-  io: ProcessIO,
+  values: ReturnType<typeof argvValues>,
   pagination: { defaultLimit: number; maxLimit: number },
-): Promise<{ input: Record<string, unknown>; fromStdin: boolean }> {
+): Promise<{ input: Record<string, unknown>; stdin: StdinUse }> {
   const positionals = tokens.filter((token) => token.kind === "pos").map((token) => token.value)
   const flagTokens = tokens.filter((token) => token.kind === "flag")
   const byName = new Map<string, Field>()
   for (const field of operation.inputFields) byName.set(field.name, field)
   const args = operation.args ?? []
   const input: Record<string, unknown> = {}
-  let fromStdin = false
 
   if (flags.input) {
-    const expanded = await expandAt(flags.input, io)
-    fromStdin ||= expanded.fromStdin
+    const text = await values.text({ kind: "input" }, flags.input)
     let parsed: unknown
     try {
-      parsed = JSON.parse(expanded.text)
+      parsed = JSON.parse(text)
     } catch {
       fail.usage("invalid --input JSON", { hint: "pass a JSON object or @path" })
     }
@@ -250,9 +243,8 @@ async function bindOp(
       }
       continue
     }
-    const expanded = await expandAt(raw, io)
-    fromStdin ||= expanded.fromStdin
-    input[name] = field ? coerce(field, expanded.text) : expanded.text
+    const text = await values.text({ kind: "arg", field, index: i }, raw)
+    input[name] = field ? coerce(field, text) : text
   }
   if (positionals.length > args.length) {
     fail.usage(`unexpected argument "${positionals[args.length]}"`, {
@@ -289,14 +281,13 @@ async function bindOp(
       continue
     }
     const raw = token.value === true ? "" : String(token.value)
-    const expanded = await expandAt(raw, io)
-    fromStdin ||= expanded.fromStdin
     if (field.type === "array") {
       const current = Array.isArray(input[field.name]) ? [...(input[field.name] as unknown[])] : []
       current.push(...raw.split(",").filter(Boolean).map((part) => coerce({ ...field, type: field.items ?? "string" }, part)))
       input[field.name] = current
     } else {
-      input[field.name] = coerce(field, expanded.text)
+      const text = await values.text({ kind: "flag", field }, raw)
+      input[field.name] = coerce(field, text)
     }
   }
 
@@ -305,7 +296,7 @@ async function bindOp(
     input.limit = limit
     if (flags.cursor) input.cursor = flags.cursor
   }
-  return { input, fromStdin }
+  return { input, stdin: values.stdin }
 }
 
 export async function parseArgv(app: App, argv: readonly string[], io: ProcessIO): Promise<Invocation> {
@@ -389,8 +380,20 @@ export async function parseArgv(app: App, argv: readonly string[], io: ProcessIO
         json,
       }
     }
-    const bound = await bindOp(found.op, leftover, flags, io, app.pagination)
-    return { kind: "run", op: found.op, input: bound.input, flags: { ...flags, input: bound.fromStdin ? "@-" : flags.input } }
+    const values = argvValues(io)
+    const bound = await bindOp(found.op, leftover, flags, values, app.pagination)
+    const runFlags: RunFlags = {
+      json: flags.json,
+      human: flags.human,
+      fields: flags.fields,
+      limit: flags.limit,
+      cursor: flags.cursor,
+      yes: flags.yes,
+      help: flags.help,
+      version: flags.version,
+      token: flags.token,
+    }
+    return { kind: "run", op: found.op, input: bound.input, flags: runFlags, stdin: bound.stdin }
   } catch (error) {
     if (isFail(error)) {
       return { kind: "usage_error", failure: error, scope: [], json }
@@ -609,10 +612,9 @@ export async function main(app: App, io = processIO()): Promise<ExitCode> {
   }
   const mode = resolveMode(inv.op.output.kind, inv.flags, detection.actor)
   if (mode instanceof Fail) return writeError(mode, Boolean(inv.flags.json) || machine, io)
-  const usedStdinBody = inv.flags.input === "@-"
   let confirmed = Boolean(inv.flags.yes)
   if (inv.op.confirm && !confirmed) {
-    const human: HumanTty | null = usedStdinBody ? null : detection.human
+    const human: HumanTty | null = inv.stdin.kind === "consumed" ? null : detection.human
     if (human) {
       const message = typeof inv.op.confirm === "function" ? inv.op.confirm(inv.input as never) : inv.op.confirm
       const answer = await human.prompt(`${message} [y/N] `)
@@ -702,7 +704,7 @@ export async function run(app: App, argv: readonly string[], test: TestIO = {}):
       if (relative in files) return files[relative] ?? ""
       const byName = path.split("/").pop()
       if (byName && byName in files) return files[byName] ?? ""
-      return fail.usage(`cannot read ${path}`, { hint: "check the path passed after @" })
+      throw new Error(`cannot read ${path}`)
     },
     keychain: {
       get: async (service, account) => test.keychain?.[`${service}:${account}`] ?? null,

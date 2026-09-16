@@ -180,6 +180,74 @@ describe("opcli", () => {
     expect(JSON.parse(r.stdout).data.title).toBe("Postmortem:hello")
   })
 
+  test("create reads @./path after normalize", async () => {
+    const r = await cli.run(["tasks", "create", "--title", "Postmortem", "--body", "@./notes.md", "--json"], {
+      env,
+      files: { "/notes.md": "hello" },
+    })
+    expect(r.exit).toBe(0)
+    expect(JSON.parse(r.stdout).data.title).toBe("Postmortem:hello")
+  })
+
+  test("@@ keeps a leading at", async () => {
+    const r = await cli.run(["tasks", "create", "--title", "@@alice", "--json"], { env })
+    expect(r.exit).toBe(0)
+    expect(JSON.parse(r.stdout).data.title).toBe("@alice")
+  })
+
+  test("missing @path is usage", async () => {
+    const r = await cli.run(["tasks", "create", "--title", "x", "--body", "@missing.md"], { env })
+    expect(r.exit).toBe(2)
+    expect(r.stdout).toBe("")
+    expect(r.stderr).toContain("cannot read missing.md")
+  })
+
+  test("@- fills a string flag from stdin", async () => {
+    const r = await cli.run(["tasks", "create", "--title", "Postmortem", "--body", "@-", "--json"], {
+      env,
+      stdin: "hello",
+    })
+    expect(r.exit).toBe(0)
+    expect(JSON.parse(r.stdout).data.title).toBe("Postmortem:hello")
+  })
+
+  test("second @- is usage", async () => {
+    const r = await cli.run(["tasks", "create", "--title", "@-", "--body", "@-"], { env, stdin: "once" })
+    expect(r.exit).toBe(2)
+    expect(r.stderr).toContain("already read")
+  })
+
+  test("@- plus confirm requires --yes", async () => {
+    const r = await cli.run(["tasks", "delete", "@-"], { env, stdin: "tsk_1" })
+    expect(r.exit).toBe(2)
+    expect(JSON.parse(r.stderr).error.kind).toBe("usage")
+  })
+
+  test("--input @path loads a JSON object", async () => {
+    const r = await cli.run(["tasks", "create", "--input", "@payload.json", "--json"], {
+      env,
+      files: { "/payload.json": JSON.stringify({ title: "From file" }) },
+    })
+    expect(r.exit).toBe(0)
+    expect(JSON.parse(r.stdout).data.title).toBe("From file")
+  })
+
+  test("invoke leaves at-literals alone", async () => {
+    const r = await cli.invoke(
+      "tasks.create",
+      { title: "@notes.md" },
+      {
+        signal: new AbortController().signal,
+        auth: { token: "t_test", source: "env", via: "UCHO_TOKEN" },
+        confirmed: false,
+        actor: "agent",
+        note() {},
+      },
+    )
+    expect(r.kind).toBe("data")
+    if (r.kind === "data") expect((r.value as { title: string }).title).toBe("@notes.md")
+  })
+
   test("typo suggests the command", async () => {
     const r = await cli.run(["tasks", "lsit"], { env })
     expect(r.exit).toBe(2)
@@ -217,6 +285,13 @@ describe("opcli", () => {
     const leaf = await cli.run(["tasks", "list", "--help"])
     expect(leaf.stdout).toContain("--status")
     expect(leaf.stdout).toContain("--limit")
+    expect(leaf.stdout).toContain("String values accept @<path>")
+    const streamHelp = await cli.run(["logs", "tail", "--help"])
+    expect(streamHelp.stdout).not.toContain("String values accept @<path>")
+    expect(cli.skill()).toContain("## Large inputs")
+    const manifest = JSON.parse((await cli.run(["--help", "--json"])).stdout)
+    expect(manifest.valueSyntax.at.file).toBe("@<path>")
+    expect(manifest.valueSyntax.at.stdin).toBe("@-")
   })
 
   test("streams NDJSON", async () => {

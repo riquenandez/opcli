@@ -177,5 +177,6 @@ describe("projection bugs", () => {
     const body = JSON.parse(r.stdout)
     expect(body.globalFlags).not.toContain("no-color")
     expect(body.globalFlags).not.toContain("color")
+    expect(body.valueSyntax.at.escape).toBe("@@")
   })
 })
