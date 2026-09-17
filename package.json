@@ -10,7 +10,8 @@
   },
   "scripts": {
     "test": "bun test",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit",
+    "prepublishOnly": "bun test && bun run typecheck"
   },
   "files": ["src"],
   "dependencies": {
