@@ -61,14 +61,26 @@ export const fail = {
   network: (message: string, opts?: FailOpts): never => raise("network", message, opts),
 } as const
 
-export function internalFail(error: unknown): Fail {
+export function wantsDebugStacks(env: Readonly<Record<string, string | undefined>>): boolean {
+  return env.OPCLI_DEBUG === "1" || env.OPCLI_DEBUG === "true"
+}
+
+export function internalFail(
+  error: unknown,
+  opts?: {
+    readonly env?: Readonly<Record<string, string | undefined>>
+    readonly debugStacks?: boolean
+    readonly hint?: string
+  },
+): Fail {
   if (isFail(error)) return error
   const message = error instanceof Error ? error.message : String(error)
   const stack = error instanceof Error ? error.stack : undefined
+  const debug = opts?.debugStacks ?? (opts?.env ? wantsDebugStacks(opts.env) : false)
   return new Fail({
     kind: "internal",
     message,
-    hint: "this is a bug in the CLI; rerun with OPCLI_DEBUG=1 for a stack",
-    details: stack ? { stack } : undefined,
+    hint: opts?.hint ?? "this is a bug in the CLI; rerun with OPCLI_DEBUG=1 for a stack",
+    details: debug && stack ? { stack } : undefined,
   })
 }

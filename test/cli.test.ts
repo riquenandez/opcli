@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
+import { passthrough } from "../src/contract.ts"
+import { parseArgv, type ProcessIO } from "../src/cli.ts"
 import { app, fail, op, out } from "../src/index.ts"
 
 const Task = z.object({
@@ -318,5 +320,103 @@ describe("opcli", () => {
     const out = await cli.invoke("tasks.get", { id: "tsk_1" }, { auth: { token: "t", source: "env", via: "UCHO_TOKEN" } })
     expect(out.kind).toBe("data")
     if (out.kind === "data") expect((out.value as { id: string }).id).toBe("tsk_1")
+  })
+})
+
+const ProbeRow = z.object({
+  proto: z.enum(["null", "other"]),
+  polluted: z.boolean(),
+})
+
+const inspectInput = op({
+  name: "inspect",
+  summary: "Report input prototype safety",
+  input: passthrough<{ title: string }>({
+    type: "object",
+    properties: { title: { type: "string" } },
+  }),
+  output: out.single(ProbeRow),
+  effects: "read_only",
+  auth: "none",
+  examples: [{ summary: "Title", input: { title: "ok" } }],
+  run(input) {
+    const proto = Object.getPrototypeOf(input)
+    return {
+      proto: proto === null ? ("null" as const) : ("other" as const),
+      polluted: Boolean((input as { polluted?: unknown }).polluted),
+    }
+  },
+})
+
+const explode = op({
+  name: "explode",
+  summary: "Throw",
+  input: z.object({}),
+  output: out.single(z.object({ ok: z.boolean() })),
+  effects: "read_only",
+  auth: "none",
+  examples: [{ summary: "Throw", input: {} }],
+  run() {
+    throw new Error("boom")
+  },
+})
+
+const probe = app({
+  name: "probe",
+  version: "0.0.1",
+  summary: "Review probes",
+  operations: [inspectInput, explode],
+})
+
+function probeIo(): ProcessIO {
+  return {
+    argv: [],
+    env: {},
+    cwd: "/",
+    stdin: { isTTY: false, text: async () => "", question: async () => "n" },
+    stdout: { isTTY: false, write: async () => {} },
+    stderr: { isTTY: false, write: async () => {} },
+    onSignal() {},
+    readFile: async (path) => {
+      throw new Error(`cannot read ${path}`)
+    },
+    keychain: {
+      get: async () => null,
+      set: async () => {},
+      delete: async () => {},
+    },
+  }
+}
+
+describe("publish review", () => {
+  test("--input __proto__ does not pollute the bound object", async () => {
+    const payload = '{"title":"ok","__proto__":{"polluted":true}}'
+    const r = await probe.run(["inspect", "--input", payload, "--json"], { env: {} })
+    expect(r.exit).toBe(0)
+    expect(JSON.parse(r.stdout)).toEqual({ data: { proto: "null", polluted: false } })
+
+    const inv = await parseArgv(probe, ["inspect", "--input", payload], probeIo())
+    expect(inv.kind).toBe("run")
+    if (inv.kind !== "run") return
+    expect(Object.getPrototypeOf(inv.input) === null ? "null" : "other").toBe("null")
+    expect(Object.keys(inv.input)).toEqual(["title"])
+    expect((inv.input as { polluted?: unknown }).polluted).toBeUndefined()
+  })
+
+  test("OPCLI_DEBUG=1 includes a stack on handler throws", async () => {
+    const r = await probe.run(["explode", "--json"], { env: { OPCLI_DEBUG: "1" } })
+    expect(r.exit).toBe(5)
+    const stack = JSON.parse(r.stderr).error.details.stack
+    expect(typeof stack).toBe("string")
+    expect(stack).toContain("boom")
+  })
+
+  test("without OPCLI_DEBUG, handler throws omit the stack", async () => {
+    const r = await probe.run(["explode", "--json"], { env: {} })
+    expect(r.exit).toBe(5)
+    const error = JSON.parse(r.stderr).error
+    expect(error.kind).toBe("internal")
+    expect(error.message).toBe("boom")
+    expect(error.details).toBeUndefined()
   })
 })
