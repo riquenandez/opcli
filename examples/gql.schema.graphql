@@ -1,0 +1,42 @@
+scalar DateTime
+
+type Task {
+  id: ID!
+  title: String!
+  status: TaskStatus!
+  createdAt: DateTime!
+}
+
+enum TaskStatus {
+  OPEN
+  DONE
+}
+
+type TaskEdge {
+  cursor: String!
+  node: Task!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+type TaskConnection {
+  edges: [TaskEdge!]!
+  pageInfo: PageInfo!
+}
+
+input TaskFilter {
+  status: TaskStatus
+  query: String
+}
+
+type Query {
+  task(id: ID!): Task
+  tasks(filter: TaskFilter, first: Int!, after: String): TaskConnection!
+}
+
+type Mutation {
+  createTask(title: String!, body: String): Task!
+}
