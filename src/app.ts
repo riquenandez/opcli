@@ -310,10 +310,10 @@ export function app(spec: AppSpec): App {
       const extraYes = parsedInput.yes === true
       const pageLimit = parsedInput.limit
       const pageCursor = parsedInput.cursor
-      const rest = ownRecord(parsedInput)
-      delete rest.yes
-      delete rest.limit
-      delete rest.cursor
+      delete parsedInput.yes
+      delete parsedInput.limit
+      delete parsedInput.cursor
+      const rest = parsedInput
       if (operation.confirm && !full.confirmed && !extraYes) {
         const message =
           typeof operation.confirm === "function"

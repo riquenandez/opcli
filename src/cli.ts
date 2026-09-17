@@ -648,7 +648,7 @@ export async function main(app: App, io = processIO()): Promise<ExitCode> {
     if (signalExit) return signalExit
     return await render(outcome, { mode, fields: inv.flags.fields }, io, inv.op)
   } catch (error) {
-    return writeError(internalFail(error, { env: io.env }), mode === "json" || mode === "ndjson", io)
+    return writeError(internalFail(error, { debugStacks: wantsDebugStacks(io.env) }), mode === "json" || mode === "ndjson", io)
   } finally {
     restore()
   }

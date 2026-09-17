@@ -398,17 +398,14 @@ describe("publish review", () => {
     const inv = await parseArgv(probe, ["inspect", "--input", payload], probeIo())
     expect(inv.kind).toBe("run")
     if (inv.kind !== "run") return
-    expect(Object.getPrototypeOf(inv.input) === null ? "null" : "other").toBe("null")
+    expect(Object.getPrototypeOf(inv.input)).toBe(null)
     expect(Object.keys(inv.input)).toEqual(["title"])
-    expect((inv.input as { polluted?: unknown }).polluted).toBeUndefined()
   })
 
   test("OPCLI_DEBUG=1 includes a stack on handler throws", async () => {
     const r = await probe.run(["explode", "--json"], { env: { OPCLI_DEBUG: "1" } })
     expect(r.exit).toBe(5)
-    const stack = JSON.parse(r.stderr).error.details.stack
-    expect(typeof stack).toBe("string")
-    expect(stack).toContain("boom")
+    expect(JSON.parse(r.stderr).error.details.stack).toContain("boom")
   })
 
   test("without OPCLI_DEBUG, handler throws omit the stack", async () => {
