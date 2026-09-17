@@ -1,7 +1,8 @@
-import type { App } from "./app.ts"
-import type { Runtime } from "./app.ts"
+import type { App, Runtime } from "./app.ts"
 import { failurePayload } from "./fail.ts"
 import type { JsonSchema } from "./contract.ts"
+
+export type { Runtime }
 
 export type McpToolDef = {
   readonly name: string

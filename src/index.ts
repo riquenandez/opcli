@@ -1,4 +1,4 @@
-export { app, type App, type AppSpec } from "./app.ts"
+export { app, type App, type AppSpec, type Runtime } from "./app.ts"
 export { fail, type ExitCode, type Failure, type FailureKind } from "./fail.ts"
 export { op, out, type Ctx, type Credential, type Page, type Actor } from "./operation.ts"
 export type { Contract } from "./contract.ts"

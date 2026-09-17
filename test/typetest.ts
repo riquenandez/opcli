@@ -1,5 +1,18 @@
 import { z } from "zod"
+import type { Runtime } from "../src/index.ts"
+import type { Runtime as McpRuntime } from "../src/mcp.ts"
 import { fail, op, out } from "../src/index.ts"
+
+const runtime: Runtime = {
+  signal: new AbortController().signal,
+  auth: null,
+  confirmed: false,
+  actor: "agent",
+  note() {},
+}
+const mcpRuntime: McpRuntime = runtime
+void runtime
+void mcpRuntime
 
 const Task = z.object({
   id: z.string(),

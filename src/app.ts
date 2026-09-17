@@ -3,7 +3,7 @@ import { passthrough, schemaFingerprint, validate } from "./contract.ts"
 import type { Field } from "./contract.ts"
 import { skillMarkdown, manifest as buildManifest } from "./docs.ts"
 import type { Manifest } from "./docs.ts"
-import { fail, Fail, isFail } from "./fail.ts"
+import { fail, internalFail, isFail } from "./fail.ts"
 import { Whoami, tokenPrefix, type AuthSpec } from "./auth.ts"
 import {
   op,
@@ -62,6 +62,7 @@ export type Outcome =
 
 export type InvokeOptions = {
   readonly fields?: readonly string[]
+  readonly debugStacks?: boolean
 }
 
 export type App = {
@@ -90,6 +91,16 @@ function checkFlagConsistency(operations: readonly AnyOperation[]): void {
       if (!prior) seen.set(field.name, { fingerprint, op: operation.name })
     }
   }
+}
+
+export function ownRecord(value: unknown): Record<string, unknown> {
+  const out = Object.create(null) as Record<string, unknown>
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out
+  for (const key of Object.keys(value)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue
+    out[key] = (value as Record<string, unknown>)[key]
+  }
+  return out
 }
 
 function projectValue(value: unknown, fields: readonly string[]): unknown {
@@ -295,14 +306,14 @@ export function app(spec: AppSpec): App {
             : "configure auth",
         })
       }
-      const parsedInput = { ...((input ?? {}) as Record<string, unknown>) }
+      const parsedInput = ownRecord(input)
       const extraYes = parsedInput.yes === true
       const pageLimit = parsedInput.limit
       const pageCursor = parsedInput.cursor
-      const rest = { ...parsedInput }
-      delete rest.yes
-      delete rest.limit
-      delete rest.cursor
+      delete parsedInput.yes
+      delete parsedInput.limit
+      delete parsedInput.cursor
+      const rest = parsedInput
       if (operation.confirm && !full.confirmed && !extraYes) {
         const message =
           typeof operation.confirm === "function"
@@ -335,11 +346,12 @@ export function app(spec: AppSpec): App {
       await validateProduced(operation, produced)
       return toOutcome(operation, produced, opts?.fields)
     } catch (error) {
-      const failure = isFail(error) ? error : new Fail({
-        kind: "internal",
-        message: error instanceof Error ? error.message : String(error),
-        hint: `this is a bug in ${spec.name}; rerun with OPCLI_DEBUG=1 for a stack`,
-      })
+      const failure = isFail(error)
+        ? error
+        : internalFail(error, {
+            debugStacks: opts?.debugStacks,
+            hint: `this is a bug in ${spec.name}; rerun with OPCLI_DEBUG=1 for a stack`,
+          })
       return { kind: "failure", failure }
     }
   }

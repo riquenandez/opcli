@@ -1,12 +1,10 @@
 import { resolveCredential } from "./auth.ts"
-import type { App } from "./app.ts"
-import { checkFields } from "./app.ts"
+import { checkFields, ownRecord, type App, type Outcome } from "./app.ts"
 import { argvValues, type StdinUse } from "./at.ts"
 import { camel, kebab } from "./case.ts"
-import type { Outcome } from "./app.ts"
 import { detect, type HumanTty } from "./detect.ts"
 import { helpText, manifest } from "./docs.ts"
-import { EXIT_CODE, Fail, fail, failurePayload, internalFail, isFail, type ExitCode, type Failure } from "./fail.ts"
+import { EXIT_CODE, Fail, fail, failurePayload, internalFail, isFail, wantsDebugStacks, type ExitCode, type Failure } from "./fail.ts"
 import type { Field } from "./contract.ts"
 import type { AnyOperation, Actor } from "./operation.ts"
 import { suggest } from "./suggest.ts"
@@ -214,7 +212,7 @@ async function bindOp(
   const byName = new Map<string, Field>()
   for (const field of operation.inputFields) byName.set(field.name, field)
   const args = operation.args ?? []
-  const input: Record<string, unknown> = {}
+  let input: Record<string, unknown> = Object.create(null)
 
   if (flags.input) {
     const text = await values.text({ kind: "input" }, flags.input)
@@ -227,7 +225,7 @@ async function bindOp(
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       fail.usage("--input must be a JSON object")
     }
-    Object.assign(input, parsed)
+    input = ownRecord(parsed)
   }
 
   for (let i = 0; i < args.length; i++) {
@@ -646,11 +644,11 @@ export async function main(app: App, io = processIO()): Promise<ExitCode> {
       note: (message) => {
         void io.stderr.write(`${message}\n`)
       },
-    }, { fields: inv.flags.fields })
+    }, { fields: inv.flags.fields, debugStacks: wantsDebugStacks(io.env) })
     if (signalExit) return signalExit
     return await render(outcome, { mode, fields: inv.flags.fields }, io, inv.op)
   } catch (error) {
-    return writeError(internalFail(error), mode === "json" || mode === "ndjson", io)
+    return writeError(internalFail(error, { debugStacks: wantsDebugStacks(io.env) }), mode === "json" || mode === "ndjson", io)
   } finally {
     restore()
   }
