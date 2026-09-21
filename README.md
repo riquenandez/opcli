@@ -180,6 +180,16 @@ const result = await mcpCall(ucho, "tasks_list", { status: "open" }, {
 
 A failure sets `isError` to `true` and puts `failurePayload` on `structuredContent.error`. A data result puts `{ data, meta }` on `structuredContent`. A stream is collected into an array and stopped at `app.pagination.maxLimit`. Opaque output becomes text such as `opaque text/markdown`. The bytes are discarded, so `skill` through `mcpCall` is a stub.
 
+`examples/context.ts` stamps `X-User-Id` on the HTTP helper. The handler only reads `ctx.auth`. An MCP host wraps `mcpCall` with `asUser`. A sandbox agent runs the POSIX CLI. The sandbox sets env. The argv has no user id.
+
+```ts
+await callAsUser({ userId: "usr_ada", requestId: "req_1" }, "notes_list")
+```
+
+```sh
+CONTEXT_TOKEN=t_test CONTEXT_USER=usr_ada bun examples/context.ts notes list --json
+```
+
 ## Not in v1
 
 TUI, prompts as a product, file-based routing, plugin marketplace, builtin `login`/`logout`, short flags.
