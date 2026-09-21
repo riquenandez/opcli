@@ -51,7 +51,7 @@ const tasksGet = op({
   examples: [{ summary: "By ID", input: { id: "tsk_1" } }],
   run({ id }) {
     const task = api.tasks.get(id)
-    if (!task) return fail.user(`task ${id} not found`, { hint: "run `ucho tasks list`" })
+    if (!task) return fail.user(`task ${id} not found`, { hint: "run `demo tasks list`" })
     return task
   },
 })
@@ -70,19 +70,19 @@ const tasksDelete = op({
   },
 })
 
-export const ucho = app({
-  name: "ucho",
+export const demo = app({
+  name: "demo",
   version: "1.4.0",
   summary: "Task tracker",
   groups: { tasks: "Create, inspect and manage tasks" },
-  auth: { env: "UCHO_TOKEN", flag: "token" },
+  auth: { env: "DEMO_TOKEN", flag: "token" },
   operations: [tasksList, tasksGet, tasksDelete],
 })
 
-if (import.meta.main) process.exit(await ucho.main())
+if (import.meta.main) process.exit(await demo.main())
 ```
 
-`"tasks.list"` becomes `ucho tasks list`. There is no `resource()` helper. CRUD is N operations that share a prefix, which is enough for grouped help.
+`"tasks.list"` becomes `demo tasks list`. There is no `resource()` helper. CRUD is N operations that share a prefix, which is enough for grouped help.
 
 `groups` keys are those prefixes in full (`tasks`, or `projects.comments` when nested). Every implied prefix must have a caption; leftover keys fail. An operation and a group cannot share a path (`projects` next to `projects.list`).
 
@@ -103,15 +103,15 @@ Do not add Apollo. Do not add an opcli GraphQL export.
 ## What the process does
 
 ```
-$ ucho tasks list --status open --limit 2 --json
+$ demo tasks list --status open --limit 2 --json
 {"data":[{"id":"tsk_1","title":"Ship CLI","status":"open",...}],"meta":{"nextCursor":"tsk_2"}}
 
-$ ucho tasks list --fields id,titel
+$ demo tasks list --fields id,titel
 error[usage]: unknown field "titel". Did you mean "title"?
 $ echo $?
 2
 
-$ ucho tasks delete tsk_1
+$ demo tasks delete tsk_1
 error[usage]: "tasks delete" is destructive and requires --yes when no person is at the terminal
 $ echo $?
 2
@@ -131,15 +131,15 @@ Errors never touch stdout. Exit codes: `0` ok, `1` user, `2` usage, `3` auth, `4
 | Never block when not a human | `confirm` prompts only with a `HumanTty`. Otherwise `--yes` or exit 2. `@-` plus confirm is non-interactive. |
 | Mutations return the object | There is no `out.message()`. |
 | Large bodies via file | String values and `--input` accept `@path` and `@-`. `@@` escapes. Missing files are usage errors. `@-` may appear once. |
-| Help / skill cannot drift | Both are projections of the operation list. `ucho skill`, `ucho --help --json`. |
+| Help / skill cannot drift | Both are projections of the operation list. `demo skill`, `demo --help --json`. |
 | Same flag, same meaning | `app()` throws if two operations share a flag name with different schemas. |
-| Auth is inspectable | `ucho auth whoami` shows `source` and `via`. Precedence: flag > env > config > keychain-read. |
+| Auth is inspectable | `demo auth whoami` shows `source` and `via`. Precedence: flag > env > config > keychain-read. |
 
 ## Tests
 
 ```ts
-const r = await ucho.run(["tasks", "list", "--status", "open", "--limit", "1"], {
-  env: { UCHO_TOKEN: "t_test" },
+const r = await demo.run(["tasks", "list", "--status", "open", "--limit", "1"], {
+  env: { DEMO_TOKEN: "t_test" },
 })
 expect(r.exit).toBe(0)
 ```
@@ -169,9 +169,9 @@ The builtins `manifest` and `skill` appear as tools. `auth.whoami` appears when 
 Pass a full `Runtime`: `signal`, `auth`, `confirmed`, `actor`, and `note`. Put credentials on `runtime.auth`. `mcpCall` does not call `resolveCredential`. `@path`, `@-`, and `@@` stay as written. Pass the file contents as a string. Confirm with `runtime.confirmed` or with `yes: true`. There is no TTY prompt.
 
 ```ts
-const result = await mcpCall(ucho, "tasks_list", { status: "open" }, {
+const result = await mcpCall(demo, "tasks_list", { status: "open" }, {
   signal: new AbortController().signal,
-  auth: { token: "t_test", source: "env", via: "UCHO_TOKEN" },
+  auth: { token: "t_test", source: "env", via: "DEMO_TOKEN" },
   confirmed: false,
   actor: "agent",
   note() {},

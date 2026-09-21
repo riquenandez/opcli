@@ -22,7 +22,7 @@ Command names are a tree keyed by dotted segments. Occupancy is a `ReadonlyMap<S
 
 Arena base: candidate 1 (opcli / contract-first). Cross-judge agreed. Candidates 2 and 3 failed to type-check their own usage. Candidate 4 (flint) was the stronger artifact on size, but restates `wire` + enum-in-`describe`, which is the help/parser drift the article forbids, and checks `--fields` after the handler (double-delete on mutations).
 
-Grafted from flint: drop `ok()`/`Result`; `fail.*` returns `never`; `internal` → exit 5; `console.*` redirect; type tests; repeated flags are usage errors. From kernel-cli: `confirm` as a function of input; `@-` + confirm is non-interactive. From ucho: cross-op flag-consistency at `app()`; `whoami.via`; `HumanTty | null`.
+Grafted from flint: drop `ok()`/`Result`; `fail.*` returns `never`; `internal` → exit 5; `console.*` redirect; type tests; repeated flags are usage errors. From kernel-cli: `confirm` as a function of input; `@-` + confirm is non-interactive. From an earlier CLI: cross-op flag-consistency at `app()`; `whoami.via`; `HumanTty | null`.
 
 Rejected: resource DSL, bytes-only `invoke` seam, `arg`/`flag`/`wire` restatement, builtin login/logout.
 

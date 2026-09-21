@@ -18,14 +18,14 @@ const db = {
       id: "tsk_1",
       title: "Ship CLI",
       status: "open" as const,
-      url: "https://ucho.dev/t/tsk_1",
+      url: "https://example.com/t/tsk_1",
       createdAt: "2026-09-14T18:02:11Z",
     },
     {
       id: "tsk_2",
       title: "Write docs",
       status: "open" as const,
-      url: "https://ucho.dev/t/tsk_2",
+      url: "https://example.com/t/tsk_2",
       createdAt: "2026-09-14T17:40:00Z",
     },
   ],
@@ -80,7 +80,7 @@ const tasksCreate = op({
       id: "tsk_new",
       title: body ? `${title}:${body}` : title,
       status: "open" as const,
-      url: "https://ucho.dev/t/tsk_new",
+      url: "https://example.com/t/tsk_new",
       createdAt: "2026-09-15T00:00:00Z",
     }
     db.tasks.push(task)
@@ -129,15 +129,15 @@ const dump = op({
 })
 
 const cli = app({
-  name: "ucho",
+  name: "demo",
   version: "1.4.0",
   summary: "Task tracker",
   groups: { tasks: "Manage tasks", logs: "Stream logs" },
-  auth: { env: "UCHO_TOKEN", flag: "token" },
+  auth: { env: "DEMO_TOKEN", flag: "token" },
   operations: [tasksList, tasksGet, tasksCreate, tasksDelete, logsTail, dump],
 })
 
-const env = { UCHO_TOKEN: "t_test" }
+const env = { DEMO_TOKEN: "t_test" }
 
 describe("opcli", () => {
   test("list is paginated JSON when not a TTY", async () => {
@@ -240,7 +240,7 @@ describe("opcli", () => {
       { title: "@notes.md" },
       {
         signal: new AbortController().signal,
-        auth: { token: "t_test", source: "env", via: "UCHO_TOKEN" },
+        auth: { token: "t_test", source: "env", via: "DEMO_TOKEN" },
         confirmed: false,
         actor: "agent",
         note() {},
@@ -274,7 +274,7 @@ describe("opcli", () => {
     expect(r.exit).toBe(0)
     const body = JSON.parse(r.stdout).data
     expect(body.source).toBe("env")
-    expect(body.via).toBe("UCHO_TOKEN")
+    expect(body.via).toBe("DEMO_TOKEN")
     expect(body.actor).toBe("pipe")
   })
 
@@ -317,7 +317,7 @@ describe("opcli", () => {
   })
 
   test("invoke is a values seam", async () => {
-    const out = await cli.invoke("tasks.get", { id: "tsk_1" }, { auth: { token: "t", source: "env", via: "UCHO_TOKEN" } })
+    const out = await cli.invoke("tasks.get", { id: "tsk_1" }, { auth: { token: "t", source: "env", via: "DEMO_TOKEN" } })
     expect(out.kind).toBe("data")
     if (out.kind === "data") expect((out.value as { id: string }).id).toBe("tsk_1")
   })
