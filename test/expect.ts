@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { isDeepStrictEqual } from "node:util"
 
 type Expect = {
   toBe(expected: unknown): void
@@ -32,7 +33,7 @@ function omitUndefined(value: unknown): unknown {
 
 function matcher(actual: unknown, negated: boolean): Expect {
   const check = (pass: boolean, label: string) => {
-    assert.equal(negated ? !pass : pass, true, label)
+    assert.equal(pass, !negated, label)
   }
   return {
     toBe(expected) {
@@ -48,32 +49,23 @@ function matcher(actual: unknown, negated: boolean): Expect {
       check(actual === undefined, "toBeUndefined")
     },
     toEqual(expected) {
-      let pass = true
-      try {
-        assert.deepEqual(omitUndefined(actual), omitUndefined(expected))
-      } catch {
-        pass = false
-      }
-      check(pass, `toEqual ${JSON.stringify(expected)}`)
+      const actualValue = omitUndefined(actual)
+      const expectedValue = omitUndefined(expected)
+      if (negated) check(!isDeepStrictEqual(actualValue, expectedValue), "not toEqual")
+      else assert.deepEqual(actualValue, expectedValue)
     },
     toContain(expected) {
       check(typeof actual === "string" && actual.includes(expected), `toContain ${JSON.stringify(expected)}`)
     },
     toContainEqual(expected) {
-      const list = Array.isArray(actual) ? actual : []
-      const pass = list.some((item) => {
-        try {
-          assert.deepEqual(omitUndefined(item), omitUndefined(expected))
-          return true
-        } catch {
-          return false
-        }
-      })
+      assert.ok(Array.isArray(actual))
+      const pass = actual.some((item) => isDeepStrictEqual(omitUndefined(item), omitUndefined(expected)))
       check(pass, `toContainEqual ${JSON.stringify(expected)}`)
     },
     toHaveLength(length) {
-      const value = actual as { length?: number }
-      check(value.length === length, `toHaveLength ${length}`)
+      const value = actual
+      const hasLength = typeof value === "string" || Array.isArray(value)
+      check(hasLength && value.length === length, `toHaveLength ${length}`)
     },
     toHaveProperty(key) {
       check(typeof actual === "object" && actual !== null && key in actual, `toHaveProperty ${key}`)
