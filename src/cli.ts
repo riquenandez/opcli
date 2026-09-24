@@ -6,33 +6,12 @@ import { detect, type HumanTty } from "./detect.ts"
 import { helpText, manifest } from "./docs.ts"
 import { EXIT_CODE, Fail, fail, failurePayload, internalFail, isFail, wantsDebugStacks, type ExitCode, type Failure } from "./fail.ts"
 import type { Field } from "./contract.ts"
+import { processIO, readLineFrom, type ProcessIO, type Sink } from "./host.ts"
 import type { AnyOperation, Actor } from "./operation.ts"
 import { suggest } from "./suggest.ts"
 
-export type Sink = {
-  write(chunk: string | Uint8Array): Promise<void>
-  readonly isTTY: boolean
-}
-
-export type ProcessIO = {
-  readonly argv: readonly string[]
-  readonly env: Readonly<Record<string, string | undefined>>
-  readonly stdin: {
-    readonly isTTY: boolean
-    text(): Promise<string>
-    question(prompt: string): Promise<string>
-  }
-  readonly stdout: Sink
-  readonly stderr: Sink
-  readonly cwd: string
-  onSignal(handler: (signal: "SIGINT" | "SIGTERM", number: number) => void): void
-  readFile(path: string): Promise<string>
-  readonly keychain: {
-    get(service: string, account: string): Promise<string | null>
-    set(service: string, account: string, token: string): Promise<void>
-    delete(service: string, account: string): Promise<void>
-  }
-}
+export type { ProcessIO, Sink }
+export { processIO, readLineFrom }
 
 export type Mode = "json" | "ndjson" | "human" | "raw"
 
@@ -727,56 +706,6 @@ function concat(chunks: Uint8Array[]): Uint8Array {
     offset += chunk.byteLength
   }
   return out
-}
-
-export async function readLineFrom(source: AsyncIterable<Uint8Array | string>): Promise<string> {
-  let buf = ""
-  const decoder = new TextDecoder()
-  for await (const chunk of source) {
-    buf += typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true })
-    const nl = buf.search(/\r?\n/)
-    if (nl >= 0) return buf.slice(0, nl).trim()
-  }
-  return buf.trim()
-}
-
-export function processIO(): ProcessIO {
-  const env = process.env
-  return {
-    argv: process.argv,
-    env,
-    cwd: process.cwd(),
-    stdin: {
-      isTTY: Boolean(process.stdin.isTTY),
-      text: async () => new Response(process.stdin as unknown as ReadableStream).text(),
-      question: async (prompt) => {
-        process.stderr.write(prompt)
-        return readLineFrom(process.stdin)
-      },
-    },
-    stdout: {
-      isTTY: Boolean(process.stdout.isTTY),
-      write: async (chunk) => {
-        process.stdout.write(chunk)
-      },
-    },
-    stderr: {
-      isTTY: Boolean(process.stderr.isTTY),
-      write: async (chunk) => {
-        process.stderr.write(chunk)
-      },
-    },
-    onSignal: (handler) => {
-      process.on("SIGINT", () => handler("SIGINT", 2))
-      process.on("SIGTERM", () => handler("SIGTERM", 15))
-    },
-    readFile: async (path) => Bun.file(path).text(),
-    keychain: {
-      get: async () => null,
-      set: async () => {},
-      delete: async () => {},
-    },
-  }
 }
 
 export type { Actor }
