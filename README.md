@@ -10,6 +10,8 @@ Handlers never print, never prompt, and never call `process.exit`.
 bun add opcli zod
 ```
 
+The published package runs on Node 20 and later, and on Bun. `bun test` in this repo still runs the TypeScript sources.
+
 Zod 4 (or any library that implements [Standard Schema](https://standardschema.dev/) **and** Standard JSON Schema) is the validation boundary. `opcli` does not invent a second schema vocabulary.
 
 ## Define an app

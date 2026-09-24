@@ -5,20 +5,33 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts",
-    "./mcp": "./src/mcp.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp.d.ts",
+      "default": "./dist/mcp.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "engines": {
+    "node": ">=20"
   },
   "scripts": {
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit",
-    "prepublishOnly": "bun test && bun run typecheck"
+    "build": "rm -rf dist && bunx tsc -p tsconfig.build.json && bun scripts/smoke-node.ts --rewrite-dts",
+    "smoke:node": "bun scripts/smoke-node.ts",
+    "prepack": "bun run build",
+    "prepublishOnly": "bun test && bun run typecheck && bun run build && bun run smoke:node"
   },
-  "files": ["src"],
   "dependencies": {
     "@standard-schema/spec": "^1.1.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
+    "@types/node": "^22.18.0",
     "typescript": "^5.9.3",
     "zod": "^4.6.5"
   },
