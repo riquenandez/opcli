@@ -1,16 +1,24 @@
 # opcli
 
-A Bun + TypeScript library for CLIs that **agents** call thousands of times and humans call occasionally.
+A TypeScript library for CLIs that **agents** call thousands of times and humans call occasionally.
 
 You define **operations**. An operation is a typed contract: your schema, an output kind, effects, examples, and a handler that returns data (or throws `fail.*`). argv parsing, `--help`, JSON, tables, exit codes, and the agent skill file are all renderers of that one contract.
 
 Handlers never print, never prompt, and never call `process.exit`.
 
+Install with Bun.
+
 ```sh
 bun add opcli zod
 ```
 
-The published package runs on Node 20 and later, and on Bun. `bun test` in this repo still runs the TypeScript sources.
+Or install with npm on Node 20 or later.
+
+```sh
+npm install opcli zod
+```
+
+Published imports resolve to `dist/index.js` and `dist/mcp.js`. In this repository, `bun test` runs the TypeScript in `src`.
 
 Zod 4 (or any library that implements [Standard Schema](https://standardschema.dev/) **and** Standard JSON Schema) is the validation boundary. `opcli` does not invent a second schema vocabulary.
 
@@ -83,6 +91,8 @@ export const demo = app({
 
 if (import.meta.main) process.exit(await demo.main())
 ```
+
+On Bun, `import.meta.main` is true when this file is the program. Node added that property in 22.18 and in 24.2. On Node 20 the property is absent, so call `demo.main()` from your own entry check.
 
 `"tasks.list"` becomes `demo tasks list`. There is no `resource()` helper. CRUD is N operations that share a prefix, which is enough for grouped help.
 
