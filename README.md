@@ -18,7 +18,7 @@ Or install with npm on Node 20 or later.
 npm install opcli zod
 ```
 
-The published package loads `dist/index.js` and `dist/mcp.js`. In this repository, `bun test` runs the TypeScript in `src`.
+The published package loads `dist/index.js` and `dist/mcp.js`. In this repository, `npm run build` and `bun run build` both run `tsc`. `bun test` runs the TypeScript in `src`.
 
 Validate with Zod 4, or with any library that implements [Standard Schema](https://standardschema.dev/) and Standard JSON Schema. opcli does not define its own schema types.
 
