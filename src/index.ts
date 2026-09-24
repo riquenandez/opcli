@@ -4,3 +4,4 @@ export { op, out, type Ctx, type Credential, type Page, type Actor } from "./ope
 export type { Contract } from "./contract.ts"
 export { withJsonSchema } from "./contract.ts"
 export { run, main } from "./cli.ts"
+export type { ProcessIO } from "./host.ts"
