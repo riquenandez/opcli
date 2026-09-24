@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test"
+import { describe, test } from "node:test"
+import { expect } from "./expect.ts"
 import { cli } from "../examples/gql.ts"
 
 const env = { GQL_TOKEN: "t" }

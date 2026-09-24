@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { spawn } from "node:child_process"
+import { describe, test } from "node:test"
+import { fileURLToPath } from "node:url"
+import { expect } from "./expect.ts"
 import { asUser, callAsUser, cli, sandboxRun } from "../examples/context.ts"
 
 const env = { CONTEXT_TOKEN: "t_test" }
@@ -37,14 +40,19 @@ describe("context example", () => {
   })
 
   test("sandbox process argv has no user id", async () => {
-    const proc = Bun.spawn(["bun", "examples/context.ts", "notes", "list", "--json"], {
-      cwd: `${import.meta.dir}/..`,
+    const proc = spawn(process.execPath, ["examples/context.ts", "notes", "list", "--json"], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
       env: { ...process.env, CONTEXT_TOKEN: "t_test", CONTEXT_USER: "usr_ada" },
-      stdout: "pipe",
-      stderr: "pipe",
     })
-    const stdout = await new Response(proc.stdout).text()
-    expect(await proc.exited).toBe(0)
+    const { exit, stdout } = await new Promise<{ exit: number; stdout: string }>((resolve, reject) => {
+      const chunks: Buffer[] = []
+      proc.stdout.on("data", (chunk: Buffer) => chunks.push(chunk))
+      proc.on("error", reject)
+      proc.on("close", (code) => {
+        resolve({ exit: code ?? 1, stdout: Buffer.concat(chunks).toString("utf8") })
+      })
+    })
+    expect(exit).toBe(0)
     expect(JSON.parse(stdout).data).toEqual([{ id: "n_1", body: "Ada's note" }])
   })
 

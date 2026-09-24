@@ -18,7 +18,7 @@ Or install with npm on Node 20 or later.
 npm install opcli zod
 ```
 
-The published package loads `dist/index.js` and `dist/mcp.js`. In this repository, `npm run build` and `bun run build` both run `tsc`. `bun test` runs the TypeScript in `src`.
+The published package loads `dist/index.js` and `dist/mcp.js`. In this repository, `npm run build` and `bun run build` both run `tsc`. `npm test` and `bun test` run the same files.
 
 Validate with Zod 4, or with any library that implements [Standard Schema](https://standardschema.dev/) and Standard JSON Schema. opcli does not define its own schema types.
 
@@ -104,7 +104,7 @@ The name `tasks.list` runs as `demo tasks list`. There is no `resource()` helper
 
 1. Generate Zod from your `.graphql` schema with GraphQL Codegen. Use the `typescript` and `typescript-validation-schema` plugins with `schema: "zodv4"`.
 2. Install `@graphql-codegen/cli`, `@graphql-codegen/typescript`, and `graphql-codegen-typescript-validation-schema` outside this package. Then run `bunx graphql-codegen --config examples/gql.codegen.ts`.
-3. Commit the generated file so `bun test` and `tsc` do not run codegen. If `tsc` rejects `z.lazy` factories, declare them in dependency order without `z.lazy`. Drop the `Properties<T>` return type on nested factories when `__typename` becomes `unknown`. This schema has no cycle through `Task`.
+3. Commit the generated file so `npm test` and `tsc` do not run codegen. Replace a generated `enum` with a const object. Node strips types and rejects `enum`. If `tsc` rejects `z.lazy` factories, declare them in dependency order without `z.lazy`. Drop the `Properties<T>` return type on nested factories when `__typename` becomes `unknown`. This schema has no cycle through `Task`.
 4. Pass `TaskSchema().omit({ __typename: true })` as the operation output so `--fields` does not list `__typename`.
 5. Keep CLI input as flat flags such as `status`, `id`, and `title`. Build the GraphQL variables inside `run`.
 6. Map `{ edges, pageInfo }` to `{ items, nextCursor }` with one helper.

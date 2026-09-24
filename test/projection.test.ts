@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test"
+import { describe, test } from "node:test"
+import { expect } from "./expect.ts"
 import { z } from "zod"
 import { app, fail, op, out } from "../src/index.ts"
 import { readLineFrom } from "../src/cli.ts"

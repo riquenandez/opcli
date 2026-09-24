@@ -19,12 +19,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "bun test",
+    "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/smoke-node.ts --rewrite-dts",
     "smoke:node": "node scripts/smoke-node.ts",
     "prepack": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/smoke-node.ts --rewrite-dts",
-    "prepublishOnly": "bun test && tsc --noEmit && rm -rf dist && tsc -p tsconfig.build.json && node scripts/smoke-node.ts --rewrite-dts && node scripts/smoke-node.ts"
+    "prepublishOnly": "node --test test/*.test.ts && tsc --noEmit && rm -rf dist && tsc -p tsconfig.build.json && node scripts/smoke-node.ts --rewrite-dts && node scripts/smoke-node.ts"
   },
   "dependencies": {
     "@standard-schema/spec": "^1.1.0"
