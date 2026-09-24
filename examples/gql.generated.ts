@@ -70,10 +70,11 @@ export type TaskFilter = {
   status?: InputMaybe<TaskStatus>;
 };
 
-export enum TaskStatus {
-  Done = 'DONE',
-  Open = 'OPEN'
-}
+export const TaskStatus = {
+  Done: "DONE",
+  Open: "OPEN",
+} as const
+export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus]
 
 
 type Properties<T> = {
@@ -86,7 +87,7 @@ export const isDefinedNonNullAny = (v: any): v is definedNonNullAny => v !== und
 
 export const definedNonNullAnySchema = z.any().refine((v) => isDefinedNonNullAny(v));
 
-export const TaskStatusSchema: z.ZodType<TaskStatus, TaskStatus> = z.enum(TaskStatus);
+export const TaskStatusSchema: z.ZodType<TaskStatus, TaskStatus> = z.enum(["DONE", "OPEN"])
 
 export function PageInfoSchema(): z.ZodObject<Properties<PageInfo>> {
   return z.object({

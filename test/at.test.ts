@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test"
+import { describe, test } from "node:test"
+import { expect } from "./expect.ts"
 import { argvValues, expandsAt, parseAt, resolvePath, type Slot } from "../src/at.ts"
 import type { Field } from "../src/contract.ts"
 import { isFail } from "../src/fail.ts"
